@@ -1,0 +1,23 @@
+{
+  "name": "ClaudeCompany",
+  "owner": {
+    "name": "DaigoIto"
+  },
+  "metadata": {
+    "description": "どんな事業でも使える汎用CEOシステム。オンボーディング3問で即運用開始。サブAgentは稟議で追加。"
+  },
+  "plugins": [
+    {
+      "name": "company",
+      "source": "./plugins/company",
+      "description": "どんな事業でも使える汎用CEOシステム。オンボーディング3問で即運用開始。サブAgentは稟議で追加。",
+      "version": "3.1.0",
+      "author": {
+        "name": "DaigoIto"
+      },
+      "repository": "https://github.com/DaigoIto/ClaudeCompany",
+      "category": "productivity",
+      "tags": ["company", "organization", "secretary", "productivity", "management"]
+    }
+  ]
+}

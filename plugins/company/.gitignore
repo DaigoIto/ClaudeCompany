@@ -1,0 +1,5 @@
+# Claude Code が自動生成するキャッシュ・ロックファイル
+*.lock
+.in_use/
+.DS_Store
+Thumbs.db
