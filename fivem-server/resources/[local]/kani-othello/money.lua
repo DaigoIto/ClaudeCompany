@@ -20,6 +20,8 @@ local function esxPlayer(src)
     return exports['es_extended']:getSharedObject().GetPlayerFromId(src)
 end
 
+Money.qbPlayer, Money.esxPlayer = qbPlayer, esxPlayer
+
 -- スタンドアロン: license ごとに resource KVP へ保存
 local function walletKey(src)
     local id = GetPlayerIdentifierByType(src, 'license') or ('src:' .. src)

@@ -11,10 +11,26 @@ local function resetTable(t)
     t.bet, t.escrow = 0, {}
 end
 
-for _, tc in ipairs(Config.Tables) do
-    local t = { id = tc.id }
+local function newTable(id, label, coords, heading, owner)
+    local t = { id = id, label = label, coords = coords, heading = heading or 0.0, owner = owner }
     resetTable(t)
-    tables[tc.id] = t
+    tables[id] = t
+    return t
+end
+
+for _, tc in ipairs(Config.Tables) do newTable(tc.id, tc.label, tc.coords, tc.heading) end
+
+-- クライアントへ配る卓の一覧
+local function tableList()
+    local list = {}
+    for _, t in pairs(tables) do
+        list[#list + 1] = { id = t.id, label = t.label, coords = t.coords, heading = t.heading, owner = t.owner or false }
+    end
+    return list
+end
+
+local function syncTables(target)
+    TriggerClientEvent('kani-gomoku:tables', target or -1, tableList())
 end
 
 local function fmt(n)
@@ -235,6 +251,7 @@ RegisterNetEvent('kani-gomoku:join', function(data)
     local tid, bet = tonumber(data.tableId), tonumber(data.bet)
     local t = tables[tid]
     if not t or seatOf[src] or not bet then return end
+    if #(GetEntityCoords(GetPlayerPed(src)) - t.coords) > 6.0 then return end
     bet = math.floor(bet)
     local count = (t.seats[1] and 1 or 0) + (t.seats[2] and 1 or 0)
 
@@ -268,8 +285,60 @@ RegisterNetEvent('kani-gomoku:leave', function()
     removePlayer(source, 'leave')
 end)
 
+local function removeTable(t, reasonForSeated)
+    dissolve(t, nil, reasonForSeated)
+    tables[t.id] = nil
+    syncTables()
+end
+
 AddEventHandler('playerDropped', function()
-    removePlayer(source, 'drop')
+    local src = source
+    removePlayer(src, 'drop')
+    for _, t in pairs(tables) do
+        if t.owner == src then removeTable(t, '卓の持ち主が抜けたため、卓が片付けられました') end
+    end
+end)
+
+---------------------------------------------------------------- アイテムで置く卓
+local nextId = 1000
+
+local function ownedTable(src)
+    for _, t in pairs(tables) do if t.owner == src then return t end end
+end
+
+-- アイテムを使った: 置く位置はクライアントで決めてもらう
+Item.onUse(function(src)
+    if ownedTable(src) then return notice(src, 'もう卓を置いています。先に片付けてください') end
+    TriggerClientEvent('kani-gomoku:placeSet', src)
+end)
+
+RegisterNetEvent('kani-gomoku:place', function(coords, heading)
+    local src = source
+    if type(coords) ~= 'vector3' or type(heading) ~= 'number' then return end
+    if not Item.has(src) then return notice(src, '五目並べセットを持っていません') end
+    if ownedTable(src) then return notice(src, 'もう卓を置いています。先に片付けてください') end
+    local count = 0
+    for _, t in pairs(tables) do
+        if t.owner then count = count + 1 end
+        if #(t.coords - coords) < Config.Item.MinGap then return notice(src, '近くに別の卓があります') end
+    end
+    if count >= Config.Item.MaxPlaced then return notice(src, 'これ以上卓を置けません') end
+    if #(GetEntityCoords(GetPlayerPed(src)) - coords) > Config.Item.Distance + 2.0 then return end
+    nextId = nextId + 1
+    local t = newTable(nextId, Config.Item.Label, coords, heading, src)
+    syncTables()
+    syncBoard(t)
+    notice(src, '卓を置きました。片付けるときは卓の前で G')
+end)
+
+RegisterNetEvent('kani-gomoku:pickup', function(tid)
+    local src = source
+    local t = tables[tonumber(tid)]
+    if not t or t.owner ~= src then return end
+    if t.seats[1] or t.seats[2] then return notice(src, '人が座っている間は片付けられません') end
+    tables[t.id] = nil
+    syncTables()
+    notice(src, '卓を片付けました')
 end)
 
 RegisterNetEvent('kani-gomoku:move', function(x, y)
@@ -312,6 +381,13 @@ RegisterNetEvent('kani-gomoku:next', function()
         local other = t.seats[3 - info.seat]
         if other then notice(other, (t.names[info.seat] or '相手') .. ' が再戦を希望しています') end
     end
+end)
+
+-- クライアント起動時: 卓の一覧と盤面を送る
+RegisterNetEvent('kani-gomoku:requestBoards', function()
+    local src = source
+    syncTables(src)
+    for _, t in pairs(tables) do syncBoard(t, src) end
 end)
 
 AddEventHandler('onResourceStop', function(res)

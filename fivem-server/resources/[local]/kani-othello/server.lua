@@ -221,6 +221,7 @@ end
 RegisterNetEvent('kani-othello:requestBoards', function()
     local src = source
     for _, t in pairs(tables) do syncBoard(t, src) end
+    TriggerEvent('kani-othello:internalSendPlaced', src)
 end)
 
 RegisterNetEvent('kani-othello:getMoney', function()
@@ -371,3 +372,149 @@ AddEventHandler('onResourceStop', function(res)
         end
     end
 end)
+
+-- ---------------------------------------------------------------- アイテムで置ける卓
+local placed = {}              -- [id] = { id, x, y, z, h, owner, free }
+local nextPlacedId = 1000
+
+local function licenseOf(src)
+    return GetPlayerIdentifierByType(src, 'license') or ('src:' .. src)
+end
+
+local function toast(src, text)
+    TriggerClientEvent('kani-othello:toast', src, text)
+end
+
+local function placedList()
+    local l = {}
+    for _, p in pairs(placed) do l[#l + 1] = { id = p.id, x = p.x, y = p.y, z = p.z, h = p.h } end
+    table.sort(l, function(a, b) return a.id < b.id end)
+    return l
+end
+
+local function sendPlaced(target)
+    TriggerClientEvent('kani-othello:placed', target or -1, placedList())
+end
+
+AddEventHandler('kani-othello:internalSendPlaced', function(src) sendPlaced(src) end)
+
+local function savePlaced()
+    if not Config.Placeable.Persist then return end
+    local arr = {}
+    for _, p in pairs(placed) do arr[#arr + 1] = p end
+    SetResourceKvp('placed_tables', json.encode(arr))
+end
+
+local function addPlacedTable(p)
+    placed[p.id] = p
+    tables[p.id] = { id = p.id, seats = {}, names = {}, phase = 'waiting' }
+    if p.id >= nextPlacedId then nextPlacedId = p.id + 1 end
+end
+
+-- 起動時: 保存済みの卓を復元
+do
+    local raw = Config.Placeable.Persist and GetResourceKvpString('placed_tables') or nil
+    local arr = raw and json.decode(raw) or nil
+    if arr then
+        for _, p in ipairs(arr) do addPlacedTable(p) end
+    end
+end
+
+local lastUse = {}
+-- consume=true: アイテムを1個消費して置く。false: 管理者コマンド(消費なし)
+local function placeTableFor(src, consume)
+    local P = Config.Placeable
+    local now = GetGameTimer()
+    if lastUse[src] and now - lastUse[src] < 1500 then return false end   -- 二重発火の防止
+    lastUse[src] = now
+
+    local ped = GetPlayerPed(src)
+    if not ped or ped == 0 then return false end
+    local pc, h = GetEntityCoords(ped), GetEntityHeading(ped)
+    local r = math.rad(h)
+    local x, y = pc.x - math.sin(r) * P.Distance, pc.y + math.cos(r) * P.Distance
+
+    local owner = licenseOf(src)
+    local count, total = 0, 0
+    for _, p in pairs(placed) do
+        total = total + 1
+        if p.owner == owner then count = count + 1 end
+    end
+    if total >= P.MaxTotal then toast(src, 'これ以上は卓を置けません') return false end
+    if count >= P.MaxPerPlayer then
+        toast(src, ('卓は1人%d台まで置けます。先に片付けてください'):format(P.MaxPerPlayer))
+        return false
+    end
+    local function tooClose(cx, cy)
+        local dx, dy = x - cx, y - cy
+        return (dx * dx + dy * dy) < P.MinSpacing * P.MinSpacing
+    end
+    for _, t in ipairs(Config.Tables) do
+        if tooClose(t.coords.x, t.coords.y) then toast(src, '他の卓に近すぎます') return false end
+    end
+    for _, p in pairs(placed) do
+        if tooClose(p.x, p.y) then toast(src, '他の卓に近すぎます') return false end
+    end
+
+    if consume and not Inv.remove(src) then
+        toast(src, '卓を置けませんでした(アイテムを使用できません)')
+        return false
+    end
+
+    local p = { id = nextPlacedId, x = x, y = y, z = pc.z, h = h, owner = owner, free = not consume or nil }
+    addPlacedTable(p)
+    savePlaced()
+    sendPlaced()
+    syncBoard(tables[p.id])
+    toast(src, '卓を置きました。片付けるときは卓の横で G キー')
+    return true
+end
+
+RegisterNetEvent('kani-othello:pickupTable', function(tid)
+    local src = source
+    local p, t = placed[tid], tables[tid]
+    if not p or not t then return end
+    if t.seats[1] or t.seats[2] then toast(src, '使用中の卓は片付けられません') return end
+    if Config.Placeable.OnlyOwnerPickup and p.owner ~= licenseOf(src)
+        and not IsPlayerAceAllowed(src, 'command.othellopickup') then
+        toast(src, '他の人の卓は片付けられません')
+        return
+    end
+    local ped = GetPlayerPed(src)
+    if not ped or ped == 0 or #(GetEntityCoords(ped) - vec3(p.x, p.y, p.z)) > 4.0 then return end
+    if not p.free and Inv.available() then
+        if not Inv.add(src) then toast(src, '持ち物がいっぱいで片付けられません') return end
+    end
+    placed[tid], tables[tid] = nil, nil
+    savePlaced()
+    sendPlaced()
+    toast(src, p.free and '卓を片付けました' or '卓を片付けました(アイテムに戻りました)')
+end)
+
+-- 使えるアイテムとして登録 (フレームワークの起動順を待つ)
+CreateThread(function()
+    Wait(1500)
+    local item, fw = Config.Placeable.Item, Money.framework()
+    local function use(source) placeTableFor(source, true) end
+    if fw == 'qbx' then
+        exports.qbx_core:CreateUseableItem(item, use)
+    elseif fw == 'qb' then
+        exports['qb-core']:GetCoreObject().Functions.CreateUseableItem(item, use)
+    elseif fw == 'esx' then
+        exports['es_extended']:getSharedObject().RegisterUsableItem(item, use)
+    end
+end)
+
+-- ox_inventory の item 定義で server = { export = 'kani-othello.othello_table' } を使う場合(フレームワーク無しの ox 用)
+exports('othello_table', function(event, item, inventory)
+    if event == 'usingItem' and inventory and inventory.id then
+        placeTableFor(inventory.id, true)
+        return false
+    end
+end)
+
+-- 管理者コマンド: アイテム無しで卓を置く(ace: command.othelloplace)。サーバーコンソールからは使えない
+RegisterCommand('othelloplace', function(src)
+    if src == 0 then print('ゲーム内から実行してください') return end
+    placeTableFor(src, false)
+end, true)

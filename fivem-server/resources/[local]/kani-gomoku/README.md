@@ -2,8 +2,11 @@
 
 フレームワーク非依存(Qbox/ESX/QBCore どれでも/なしでも動く)。
 
-- `/gomoku` : どこでも開いてCPU戦(強さ3段階)
-- 卓(`config.lua` の `Config.Tables`)の近くで E : 2人対戦。2人座ると開始、勝敗判定はサーバー側で管理
+- アイテム「五目並べセット」(`gomoku_set`)を使う : 目の前に卓を置く。置いた人は卓の前で G で片付け
+  - アイテムは減らない。置けるのは1人1卓、サーバー全体で `Config.Item.MaxPlaced` 卓まで。置いた人が抜けると卓も消える
+  - インベントリへの登録手順は `install/README.md`(ox_inventory 用の定義とアイコン画像入り)
+- 卓の近くで E : 2人対戦(賭けあり)か CPU 戦(強さ3段階)。2人座ると開始、勝敗判定はサーバー側で管理
+- 常設の卓も `Config.Tables` に座標を書けば置ける。`Config.Command` にコマンド名を入れると、どこでも CPU 戦を開ける(初期値は無し)
 - ルール: 15×15・五連以上で勝ち。1局ごとに先手(黒)を交代し、勝ち数を表示
 
 ## 賭け (対人戦)
@@ -27,5 +30,6 @@
 - 椅子の向き・座る高さ・石の大きさは `config.lua` で調整
 
 ## 導入
-`resources/[local]/kani-gomoku` を置いて `server.cfg` に `ensure kani-gomoku`。
-卓の座標・プロップ・キーは `config.lua`。
+1. `kani-gomoku` フォルダをリソースに置き、起動されるようにする(`ensure kani-gomoku` など)
+2. `install/README.md` の手順でアイテム `gomoku_set` をインベントリに登録
+3. 設定は `config.lua`

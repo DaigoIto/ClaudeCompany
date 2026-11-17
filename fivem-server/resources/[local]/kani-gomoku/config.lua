@@ -1,6 +1,6 @@
 Config = {}
 
-Config.Command   = 'gomoku'     -- どこでも開けるコマンド(CPU戦)
+Config.Command   = false        -- どこでも CPU 戦を開けるコマンド名 (例 'gomoku')。false で無し
 Config.UseKey    = 38           -- 卓で押すキー (38 = E)
 Config.DrawDist  = 12.0         -- マーカーを描画する距離
 Config.UseDist   = 1.8          -- 操作できる距離
@@ -18,10 +18,21 @@ Config.Money = {
     StartBalance = 10000,       -- 内蔵の財布(wallet)の初期所持金(初回のみ)
 }
 
--- 対人戦の卓。座標を増やせば卓が増える (id は重複させない)
+-- アイテム「五目並べセット」: 使うと目の前に卓を置く。置いた人だけが片付けられる
+-- (アイテムは減らない。1人1卓まで。置いた人が抜けると卓も消える)
+Config.Item = {
+    Name       = 'gomoku_set',  -- インベントリのアイテム名
+    Label      = '五目並べ卓',   -- 卓の上に出る名前
+    MaxPlaced  = 10,            -- サーバー全体で置ける卓の数
+    Distance   = 1.7,           -- 自分から卓の中心までの距離(m)
+    MinGap     = 3.5,           -- 他の卓とあける間隔(m)
+    PickupKey  = 47,            -- 片付けるキー (47 = G)
+}
+
+-- 常設の卓(任意)。座標を書けばアイテム無しでも置いておける (id は 1〜999)
 -- coords: 卓の中心(プレイヤーが立つ高さ = 地面+約1m), heading: 卓の向き(席1→席2 がこの向き)
 Config.Tables = {
-    { id = 1, label = '五目並べ卓', coords = vec3(1694.0, 3256.0, 41.1), heading = 0.0 },
+    -- { id = 1, label = '五目並べ卓', coords = vec3(1694.0, 3256.0, 41.1), heading = 0.0 },
 }
 
 -- 卓・椅子のモデル。先頭から順に「ゲームに存在するもの」を使う

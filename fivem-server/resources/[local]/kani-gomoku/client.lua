@@ -6,6 +6,8 @@ local seated = false
 local spawned = {}         -- [tid] = { table, chairs = {obj, obj}, top = z, goban, gobanTop = z, stoneObjs = {[x..','..y] = {obj, c}}, ver }
 local boards = {}          -- [tid] = { stones = {{x,y,c}...}, names = {n1, n2}, last = {x,y}, ver }
 local boardVer = 0
+local tableList = {}       -- サーバーから届く卓の一覧 { id, label, coords, heading, owner }
+local myServerId = GetPlayerServerId(PlayerId())
 
 ---------------------------------------------------------------- helpers
 local function toWorld(t, ox, oy, oz)
@@ -15,7 +17,7 @@ local function toWorld(t, ox, oy, oz)
 end
 
 local function tableById(tid)
-    for _, t in ipairs(Config.Tables) do if t.id == tid then return t end end
+    for _, t in ipairs(tableList) do if t.id == tid then return t end end
 end
 
 local function loadFirstModel(list)
@@ -83,9 +85,11 @@ local function leaveTable()
     standUp()
 end
 
-RegisterCommand(Config.Command, function()
-    if not isOpen then setOpen(true, nil) end
-end, false)
+if Config.Command then
+    RegisterCommand(Config.Command, function()
+        if not isOpen then setOpen(true, nil) end
+    end, false)
+end
 
 ---------------------------------------------------------------- ブリップ
 CreateThread(function()
@@ -163,10 +167,15 @@ end
 CreateThread(function()
     while true do
         local pos = GetEntityCoords(PlayerPedId())
-        for _, t in ipairs(Config.Tables) do
+        local alive = {}
+        for _, t in ipairs(tableList) do
+            alive[t.id] = true
             local near = #(pos - t.coords) < 80.0
             if near and not spawned[t.id] then spawnTable(t)
             elseif not near and spawned[t.id] then despawnTable(t.id) end
+        end
+        for tid in pairs(spawned) do
+            if not alive[tid] then despawnTable(tid) end
         end
         Wait(2000)
     end
@@ -281,7 +290,7 @@ CreateThread(function()
     while true do
         local wait = 500
         local pos = GetEntityCoords(PlayerPedId())
-        for _, t in ipairs(Config.Tables) do
+        for _, t in ipairs(tableList) do
             local d = #(pos - t.coords)
             local sp = spawned[t.id]
             if sp and d < Config.BoardDist then
@@ -293,11 +302,14 @@ CreateThread(function()
                 local m = toWorld(t, 0.0, -(Config.SeatDistance + 0.8), -0.95)
                 DrawMarker(1, m.x, m.y, m.z, 0,0,0, 0,0,0, 0.8,0.8,0.4, 232,198,106, 120, false, false, 2, false)
                 if #(pos - vec3(m.x, m.y, pos.z)) < Config.UseDist then
+                    local mine = t.owner == myServerId
                     BeginTextCommandDisplayHelp('STRING')
-                    AddTextComponentSubstringPlayerName('~INPUT_CONTEXT~ ' .. t.label .. 'を開く')
+                    AddTextComponentSubstringPlayerName('~INPUT_CONTEXT~ ' .. t.label .. 'を開く' .. (mine and '~n~~INPUT_DETONATE~ 卓を片付ける' or ''))
                     EndTextCommandDisplayHelp(0, false, true, -1)
                     if IsControlJustReleased(0, Config.UseKey) then
                         setOpen(true, t.id)
+                    elseif mine and IsControlJustReleased(0, Config.Item.PickupKey) then
+                        TriggerServerEvent('kani-gomoku:pickup', t.id)
                     end
                 end
             end
@@ -377,6 +389,32 @@ RegisterNetEvent('kani-gomoku:kicked', function(reason)
         AddTextComponentSubstringPlayerName('五目並べ: ' .. reason)
         EndTextCommandThefeedPostTicker(false, false)
     end
+end)
+
+-- 卓の一覧 (常設 + アイテムで置かれた卓)
+RegisterNetEvent('kani-gomoku:tables', function(list)
+    tableList = list or {}
+    -- 着席中の卓が消えたら立つ
+    if currentTable and not tableById(currentTable) then
+        currentTable, mySeat = nil, nil
+        standUp()
+    end
+end)
+
+-- アイテムを使った: 目の前の地面に卓を置く
+RegisterNetEvent('kani-gomoku:placeSet', function()
+    local ped = PlayerPedId()
+    if IsPedInAnyVehicle(ped, false) or IsPedSwimming(ped) or IsPedFalling(ped) then
+        return TriggerEvent('kani-gomoku:notice', 'ここでは卓を置けません')
+    end
+    local heading = GetEntityHeading(ped)
+    local p = GetOffsetFromEntityInWorldCoords(ped, 0.0, Config.Item.Distance, 0.0)
+    local found, gz = GetGroundZFor_3dCoord(p.x, p.y, p.z + 1.0, false)
+    if not found or math.abs(gz - (p.z - 1.0)) > 1.0 then
+        return TriggerEvent('kani-gomoku:notice', '平らな地面の上で使ってください')
+    end
+    -- 卓の向き: 席1(手前)が自分の側になるようにする
+    TriggerServerEvent('kani-gomoku:place', vector3(p.x, p.y, gz + 1.0), heading + 0.0)
 end)
 
 -- 全員に配られる盤面 (見物用)。board は 225文字の '0'/'1'/'2'

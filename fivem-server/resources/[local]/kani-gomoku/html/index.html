@@ -408,7 +408,7 @@ function showMenu(tid, note){
   $("btnOnline").disabled = !tableId;
   $("btnOnline").style.display = inFivem ? "" : "none";
   $("menuNote").className = "note" + (note ? " warn" : "");
-  $("menuNote").textContent = note || (tableId ? "卓" + tableId + " で2人対戦（賭けあり）ができます" : (inFivem ? "対人戦は卓の近くで E キーから開いてください" : ""));
+  $("menuNote").textContent = note || (tableId ? "この卓で2人対戦（賭けあり）ができます" : (inFivem ? "対人戦は卓の近くで E キーから開いてください" : ""));
 }
 function closeUi(){
   requestLeave(() => {

@@ -13,8 +13,18 @@ local function toWorld(t, ox, oy, oz)
     return vec3(t.coords.x + ox * cs - oy * sn, t.coords.y + ox * sn + oy * cs, t.coords.z + (oz or 0.0))
 end
 
+-- 固定の卓 (Config.Tables) + アイテムで置かれた卓 (サーバーから受信)
+local placedTables = {}
+local allList = Config.Tables
+local function rebuildAll()
+    allList = {}
+    for _, t in ipairs(Config.Tables) do allList[#allList + 1] = t end
+    for _, t in ipairs(placedTables) do allList[#allList + 1] = t end
+end
+local function allTables() return allList end
+
 local function tableById(tid)
-    for _, t in ipairs(Config.Tables) do if t.id == tid then return t end end
+    for _, t in ipairs(allList) do if t.id == tid then return t end end
 end
 
 local function loadFirstModel(list)
@@ -163,12 +173,17 @@ end
 CreateThread(function()
     while true do
         local pos = GetEntityCoords(PlayerPedId())
-        for _, t in ipairs(Config.Tables) do
+        local exists = {}
+        for _, t in ipairs(allTables()) do
+            exists[t.id] = true
             local near = #(pos - t.coords) < 80.0
             if near and not spawned[t.id] then spawnTable(t)
             elseif not near and spawned[t.id] then despawnTable(t.id) end
         end
-        Wait(2000)
+        for tid in pairs(spawned) do        -- 片付けられた卓の椅子を消す
+            if not exists[tid] then despawnTable(tid) end
+        end
+        Wait(1000)
     end
 end)
 
@@ -285,7 +300,7 @@ CreateThread(function()
     while true do
         local wait = 500
         local pos = GetEntityCoords(PlayerPedId())
-        for _, t in ipairs(Config.Tables) do
+        for _, t in ipairs(allTables()) do
             local d = #(pos - t.coords)
             local sp = spawned[t.id]
             if sp and d < Config.BoardDist then
@@ -297,12 +312,31 @@ CreateThread(function()
                 wait = 0
                 local m = toWorld(t, 0.0, -(Config.SeatDistance + 0.8), -0.95)
                 DrawMarker(1, m.x, m.y, m.z, 0,0,0, 0,0,0, 0.8,0.8,0.4, 232,198,106, 120, false, false, 2, false)
-                if #(pos - vec3(m.x, m.y, pos.z)) < Config.UseDist then
+                local nearE = #(pos - vec3(m.x, m.y, pos.z)) < Config.UseDist
+                if nearE then
                     BeginTextCommandDisplayHelp('STRING')
                     AddTextComponentSubstringPlayerName('~INPUT_CONTEXT~ ' .. t.label .. 'を開く')
                     EndTextCommandDisplayHelp(0, false, true, -1)
                     if IsControlJustReleased(0, Config.UseKey) then
                         setOpen(true, t.id)
+                    end
+                elseif t.placed then
+                    -- アイテムで置いた卓: 空いていれば横に立って G で片付け
+                    local bd = boards[t.id]
+                    local empty = not bd or (not bd.names[1] and not bd.names[2])
+                    if empty then
+                        for _, sx in ipairs({ -1, 1 }) do
+                            local pt = toWorld(t, sx * 0.95, 0.0, 0.0)
+                            if #(vec2(pos.x, pos.y) - vec2(pt.x, pt.y)) < 0.8 then
+                                BeginTextCommandDisplayHelp('STRING')
+                                AddTextComponentSubstringPlayerName('~INPUT_DETONATE~ ' .. t.label .. 'を片付ける')
+                                EndTextCommandDisplayHelp(0, false, true, -1)
+                                if IsControlJustReleased(0, Config.Placeable.PickupKey) then
+                                    TriggerServerEvent('kani-othello:pickupTable', t.id)
+                                end
+                                break
+                            end
+                        end
                     end
                 end
             end
@@ -357,6 +391,28 @@ RegisterNetEvent('kani-othello:kicked', function(text, tid, bet)
     currentTable, mySeat = nil, nil
     standUp()
     SendNUIMessage({ type = 'kicked', text = text, tableId = tid, tableBet = bet })
+end)
+
+-- アイテムで置かれた卓の一覧 (置く/片付けるたびに全員へ)
+RegisterNetEvent('kani-othello:placed', function(list)
+    placedTables = {}
+    local keep = {}
+    for _, p in ipairs(list or {}) do
+        keep[p.id] = true
+        placedTables[#placedTables + 1] = {
+            id = p.id, label = Config.Placeable.Label, coords = vec3(p.x, p.y, p.z), heading = p.h, placed = true,
+        }
+    end
+    for tid in pairs(boards) do          -- 片付けられた卓の盤面データを捨てる
+        if tid >= 1000 and not keep[tid] then boards[tid] = nil end
+    end
+    rebuildAll()
+end)
+
+RegisterNetEvent('kani-othello:toast', function(text)
+    BeginTextCommandThefeedPost('STRING')
+    AddTextComponentSubstringPlayerName(text)
+    EndTextCommandThefeedPostTicker(false, true)
 end)
 
 RegisterNetEvent('kani-othello:notice', function(text)

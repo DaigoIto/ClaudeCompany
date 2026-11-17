@@ -3,7 +3,7 @@
 kani-gomoku と同じ構成。フレームワーク非依存。
 
 - `/othello` : どこでも開いてCPU戦(強さ3段階)
-- 卓(`config.lua` の `Config.Tables`)の近くで E : 2人対戦。判定はサーバー側で管理
+- 卓の近くで E : 2人対戦。卓はアイテムで置く(下記)。固定卓は初期状態では無し(必要なら `Config.Tables` に追加)。判定はサーバー側で管理
 - ルール: 8×8。白(先手)が先に打ち、後手は黒。置ける所が無ければ自動パス、両者置けなければ終局。石の多い方が勝ち
 - 先手後手は1戦ごとに交代。勝ち数を表示
 
@@ -15,6 +15,29 @@ kani-gomoku と同じ構成。フレームワーク非依存。
 - 机はモデルを使わず、スクリプトで黒い天板+4本脚を描画(`Config.TableDesign` でサイズ・色・高さを調整)。当たり判定は無し(通り抜け可)。必要なら `collisionModel` に透明な当たり判定用プロップを指定
 - 盤面は 木の枠+緑の盤面+罫線+星+円盤状の石(`Config.Board`)。直前の手に赤いマーカー
 - 椅子は既存モデル(`Config.ChairModels`)
+
+## アイテムで机を出す(可搬式の卓)
+- アイテム `othello_table`(`Config.Placeable.Item`)を使うと、目の前(1.4m)に卓が置かれる。アイテムは1個消費
+- 空いている卓は、横に立って **G** で片付けるとアイテムに戻る(置いた本人のみ。管理者は ace `command.othellopickup` で可)
+- 1人1台まで・サーバー全体20台まで・他の卓と2.5m以上離す。再起動後も残る(`Persist`)
+- 管理者コマンド `/othelloplace`(ace `command.othelloplace`): アイテム無しで卓を置く。この卓を片付けてもアイテムは出ない
+- 使えるアイテムの登録は Qbox / QBCore / ESX は自動。ox_inventory があれば持ち物の増減は ox_inventory 経由
+
+### アイテム定義(サーバー側の別リソースに追加が必要)
+ox_inventory の `data/items.lua`:
+```lua
+['othello_table'] = {
+    label = 'オセロ卓',
+    weight = 5000,
+    stack = false,
+    close = true,
+    consume = 0,   -- 消費はこのリソースが行うので ox 側では消さない
+    description = '地面に置いてオセロができる机',
+},
+```
+- ox_inventory だけでフレームワーク無しの場合は、上に `server = { export = 'kani-othello.othello_table' }` も追加
+- ox_inventory を使わない QBCore は `qb-core/shared/items.lua`、ESX は `items` テーブルに、同名のアイテムを追加
+- 友人サーバー(BANAN_City)では、これらは `[Kani-script]` の外なので、サーバー管理者側で追加が必要
 
 ## 賭け(対人戦のみ。CPU戦は賭けなし)
 設定は `config.lua` の「賭け」ブロックに集約。
