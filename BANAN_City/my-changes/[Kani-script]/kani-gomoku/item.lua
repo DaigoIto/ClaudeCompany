@@ -34,7 +34,7 @@ local function use(src)
     if onUse then onUse(src) end
 end
 
--- ox_inventory は items.lua の server.export からここを呼ぶ (export 名 = アイテム名)
+-- フレームワーク無しで ox_inventory だけの場合: items.lua に server = { export = 'kani-gomoku.gomoku_set' } を書くとここが呼ばれる
 exports(name, function(event, item, inventory, slot, data)
     if event == 'usingItem' then
         use(inventory.id)
@@ -42,21 +42,23 @@ exports(name, function(event, item, inventory, slot, data)
     end
 end)
 
+-- 「使う」の登録はオセロ(kani-othello)と同じ: フレームワークの CreateUseableItem
+-- (Qbox + ox_inventory でも items.lua 側に export の指定は要らない)。所持チェックは ox_inventory があればそちら
 CreateThread(function()
-    Wait(500)
-    if started('ox_inventory') then
-        inv = 'ox'
-    elseif started('qbx_core') then
-        inv = 'qbox'
+    Wait(1500)
+    local reg
+    if started('qbx_core') then
+        reg = 'qbox'
         exports.qbx_core:CreateUseableItem(name, function(src) use(src) end)
     elseif started('qb-core') then
-        inv = 'qbcore'
+        reg = 'qbcore'
         core = exports['qb-core']:GetCoreObject()
         core.Functions.CreateUseableItem(name, function(src) use(src) end)
     elseif started('es_extended') then
-        inv = 'esx'
+        reg = 'esx'
         core = exports['es_extended']:getSharedObject()
         core.RegisterUsableItem(name, function(src) use(src) end)
     end
-    print(('[kani-gomoku] item "%s": %s'):format(name, inv or 'インベントリが見つかりません'))
+    inv = started('ox_inventory') and 'ox' or reg
+    print(('[kani-gomoku] item "%s": use=%s, inventory=%s'):format(name, reg or 'ox export のみ', inv or 'なし'))
 end)

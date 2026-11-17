@@ -18,8 +18,10 @@ Config.Money = {
     StartBalance = 10000,       -- 内蔵の財布(wallet)の初期所持金(初回のみ)
 }
 
--- アイテム「五目並べセット」: 使うと目の前に卓を置く。置いた人だけが片付けられる
--- (アイテムは減らない。1人1卓まで。置いた人が抜けると卓も消える)
+-- アイテム「五目並べセット」: 使うと目の前に卓を置く (kani-othello と同じルール)
+-- アイテムは減らない。1人1卓まで。空いていれば G / ターゲット(Altの目)で片付け
+-- 持ち主のログアウト・切断、サーバー停止で卓は消える(保存しない)
+-- アイテム定義(ox_inventory の data/items.lua)はサーバー側で追加が必要 → my-changes/導入メモ_kani-gomoku.md
 Config.Item = {
     Name       = 'gomoku_set',  -- インベントリのアイテム名
     Label      = '五目並べ卓',   -- 卓の上に出る名前
@@ -27,6 +29,8 @@ Config.Item = {
     Distance   = 1.7,           -- 自分から卓の中心までの距離(m)
     MinGap     = 3.5,           -- 他の卓とあける間隔(m)
     PickupKey  = 47,            -- 片付けるキー (47 = G)
+    UseTarget  = true,          -- ターゲット(Altの目: ox_target / qb-target)からも片付けられるようにする
+    OnlyOwnerPickup = true,     -- 置いた本人だけ片付けられる。管理者(ace command.gomokupickup)は常に可
 }
 
 -- 常設の卓(任意)。座標を書けばアイテム無しでも置いておける (id は 1〜999)

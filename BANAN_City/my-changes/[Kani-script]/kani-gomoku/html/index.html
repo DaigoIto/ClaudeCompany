@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>五目並べ</title>
+<style>
+  :root{--bg:#2b1d12;--bg2:#1f140c;--panel:#3a2718;--accent:#e6c27a;--ink:#f5ecdc;--line:#5c4027;--good:#8fe0a4;--bad:#ff9a8f}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden;color:var(--ink);font-family:"Yu Gothic","Hiragino Sans",sans-serif}
+  body{display:flex;justify-content:center;align-items:center}
+  body.standalone{background:#151515}
+  #root{display:none;position:relative;flex-direction:column;align-items:center;gap:10px;padding:14px 18px;border:2px solid var(--accent);border-radius:16px;background:linear-gradient(160deg,var(--bg),var(--bg2));box-shadow:0 10px 40px #000a;max-height:98vh}
+  h1{margin:4px 0 0;font-size:18px;letter-spacing:.3em;color:var(--accent)}
+  .panel{display:none;flex-direction:column;align-items:center;gap:12px;padding:16px 30px;min-width:340px}
+  #menu{display:flex}
+  .panel > button{width:100%;padding:13px;font-size:16px}
+  button[disabled]{opacity:.4;cursor:not-allowed}
+  .note{font-size:12px;opacity:.85;text-align:center;min-height:16px}
+  .warn{color:var(--bad)}
+  #closeBtn{position:absolute;top:8px;right:10px;padding:2px 10px;font-size:16px}
+  #game{display:none;flex-direction:column;align-items:center;gap:10px}
+  .hud{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+  .seat{display:flex;align-items:center;gap:10px;min-width:0;padding:4px 8px;border-radius:8px;border:2px solid transparent;white-space:nowrap;position:relative}
+  .seat.right{justify-content:flex-end;text-align:right}
+  .seat.turn{border-color:var(--accent);background:#e6c27a1a}
+  .seat .tag{display:none;position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:var(--accent);color:#2b1d12;font-size:11px;font-weight:bold;padding:1px 8px;border-radius:8px}
+  .seat.turn .tag{display:block}
+  .stone{width:26px;height:26px;border-radius:50%;box-shadow:0 2px 4px #0008;flex:none}
+  .stone.b{background:radial-gradient(circle at 35% 35%,#666,#050505)}
+  .stone.w{background:radial-gradient(circle at 35% 35%,#fff,#cfcfcf)}
+  .name{font-size:13px;opacity:.9;max-width:120px;overflow:hidden;text-overflow:ellipsis}
+  .stat{font-size:13px;font-variant-numeric:tabular-nums}
+  .stat b{font-size:18px}
+  .mid{text-align:center;font-size:13px;opacity:.9;white-space:nowrap}
+  .mid .bet{color:var(--accent);font-weight:bold}
+  canvas{display:block;border-radius:10px;box-shadow:0 8px 24px #0008;cursor:pointer}
+  .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center}
+  button{background:var(--panel);color:var(--ink);border:1px solid var(--accent);border-radius:8px;padding:8px 16px;font-size:14px;cursor:pointer}
+  button:hover:not([disabled]){background:#4a3320}
+  button.primary{background:var(--accent);color:#2b1d12;font-weight:bold}
+  button.primary:hover:not([disabled]){background:#f0d08f}
+  button.danger{border-color:var(--bad);color:var(--bad)}
+  select,input{background:var(--panel);color:var(--ink);border:1px solid var(--accent);border-radius:8px;padding:8px;font-size:15px}
+  input{width:100%;text-align:right;font-variant-numeric:tabular-nums}
+  #msg{min-height:22px;color:var(--accent);text-align:center}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+  .chips button{padding:5px 10px;font-size:13px;border-radius:14px}
+  .kv{width:100%;display:flex;justify-content:space-between;font-size:14px;padding:2px 0}
+  .kv b{color:var(--accent);font-variant-numeric:tabular-nums}
+  .big{font-size:26px;color:var(--accent);font-weight:bold;font-variant-numeric:tabular-nums}
+  dialog{border:2px solid var(--accent);border-radius:12px;background:var(--panel);color:var(--ink);padding:20px 30px;min-width:280px;text-align:center}
+  dialog::backdrop{background:#0009}
+  dialog h2{margin:0 0 8px;color:var(--accent)}
+  dialog .row{margin-top:14px}
+  .plus{color:var(--good)}.minus{color:var(--bad)}
+</style>
+</head>
+<body>
+<div id="root">
+  <button id="closeBtn" title="閉じる (Esc)">✕</button>
+  <h1>五目並べ</h1>
+
+  <div id="menu" class="panel">
+    <button id="btnCpu">CPUと対戦</button>
+    <button id="btnOnline" disabled>卓に着席して対人戦</button>
+    <div class="note" id="menuNote"></div>
+  </div>
+
+  <!-- 1人目: 賭け金を決めて着席 -->
+  <div id="hostPanel" class="panel">
+    <div class="kv"><span>所持金</span><b id="hostBal">-</b></div>
+    <label style="width:100%">賭け金（0 で賭けなし）
+      <input id="betInput" type="number" min="0" step="1" value="0">
+    </label>
+    <div class="chips" id="chips"></div>
+    <div class="note" id="hostNote"></div>
+    <button id="btnHost" class="primary">この金額で着席</button>
+    <button id="btnBack1">戻る</button>
+  </div>
+
+  <!-- 2人目: 金額を確認して承諾 -->
+  <div id="acceptPanel" class="panel">
+    <div class="kv"><span>先に座っている人</span><b id="accHost">-</b></div>
+    <div>賭け金</div>
+    <div class="big" id="accBet">-</div>
+    <div class="kv"><span>所持金</span><b id="accBal">-</b></div>
+    <div class="note" id="accNote"></div>
+    <button id="btnAccept" class="primary">承諾して着席</button>
+    <button id="btnBack2">戻る</button>
+  </div>
+
+  <div id="infoPanel" class="panel">
+    <div class="note" id="infoNote">卓の様子を確認中…</div>
+    <button id="btnBack3">戻る</button>
+  </div>
+
+  <div id="game">
+    <div class="hud">
+      <div class="seat" id="seatOpp"><span class="tag">手番</span><div class="stone" id="stoneOpp"></div><div><div class="name" id="nameOpp">CPU</div><div class="stat"><b id="winsOpp">0</b>勝　石 <span id="cntOpp">0</span></div></div></div>
+      <div class="mid"><div class="bet" id="betLabel"></div><div id="gameNo">1戦目</div><div id="moveLabel">0手</div></div>
+      <div class="seat right" id="seatYou"><span class="tag">手番</span><div><div class="name">あなた</div><div class="stat">石 <span id="cntYou">0</span>　<b id="winsYou">0</b>勝</div></div><div class="stone" id="stoneYou"></div></div>
+    </div>
+    <canvas id="c"></canvas>
+    <div id="msg"></div>
+    <div class="row" id="cpuRow">
+      <label>CPU強さ
+        <select id="level"><option value="0">弱い</option><option value="1" selected>普通</option><option value="2">強い</option></select>
+      </label>
+      <button id="resetBtn">成績リセット</button>
+    </div>
+    <div class="row" id="onlineRow" style="display:none">
+      <span>所持金 <b id="balLabel">-</b></span>
+      <button id="leaveBtn" class="danger">離席</button>
+    </div>
+  </div>
+</div>
+<dialog id="dlg"></dialog>
+
+<script>
+const N = 15;
+const DIRS = [[1,0],[0,1],[1,1],[1,-1]];
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const $ = id => document.getElementById(id);
+
+let mode = "cpu", tableId = null, seated = false, phase = null, tinfo = null, lastState = null;
+let board = emptyBoard(), turn = 1, you = 1, cpu = 2, moves = 0, last = null, over = true, winLine = null, hover = null, busy = false;
+let gameNo = 0, wins = {you: 0, opp: 0}, oppName = "CPU";
+let CUR = "$", lastNotice = null, pendingNote = null;
+
+function emptyBoard(){ return Array.from({length:N}, () => new Array(N).fill(0)); }
+function inb(x,y){ return x>=0 && y>=0 && x<N && y<N; }
+function money(n){ return CUR + Math.floor(n || 0).toLocaleString("en-US"); }
+
+// ---------- 描画 ----------
+function size(){ return Math.max(280, Math.min(window.innerWidth - 90, window.innerHeight - 280, 640)); }
+function resize(){
+  const s = size(), d = window.devicePixelRatio || 1;
+  cv.style.width = s + "px"; cv.style.height = s + "px";
+  cv.width = s * d; cv.height = s * d;
+  ctx.setTransform(d,0,0,d,0,0);
+  draw();
+}
+function draw(){
+  const s = size(), m = s / (N + 1);
+  ctx.clearRect(0,0,s,s);
+  const g = ctx.createLinearGradient(0,0,s,s);
+  g.addColorStop(0,"#e3b66b"); g.addColorStop(1,"#c98f3e");
+  ctx.fillStyle = g; ctx.fillRect(0,0,s,s);
+  ctx.strokeStyle = "#5a3a12"; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i=0;i<N;i++){
+    ctx.moveTo(m*(i+1), m); ctx.lineTo(m*(i+1), m*N);
+    ctx.moveTo(m, m*(i+1)); ctx.lineTo(m*N, m*(i+1));
+  }
+  ctx.stroke();
+  ctx.fillStyle = "#5a3a12";
+  for (const [x,y] of [[3,3],[11,3],[7,7],[3,11],[11,11]]){ ctx.beginPath(); ctx.arc(m*(x+1), m*(y+1), m*.11, 0, 7); ctx.fill(); }
+  const r = m * .43;
+  for (let y=0;y<N;y++) for (let x=0;x<N;x++) if (board[y][x]) stone(m*(x+1), m*(y+1), r, board[y][x], 1);
+  if (hover && myTurn() && !board[hover.y][hover.x]) stone(m*(hover.x+1), m*(hover.y+1), r, you, .4);
+  if (last){ ctx.strokeStyle = "#e0301e"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(m*(last.x+1), m*(last.y+1), r*.45, 0, 7); ctx.stroke(); }
+  if (winLine){
+    ctx.strokeStyle = "#ffe14d"; ctx.lineWidth = 3;
+    for (const ln of winLine) for (const [x,y] of ln){ ctx.beginPath(); ctx.arc(m*(x+1), m*(y+1), r+2, 0, 7); ctx.stroke(); }
+  }
+}
+function stone(px, py, r, p, a){
+  ctx.globalAlpha = a;
+  const g = ctx.createRadialGradient(px - r*.35, py - r*.35, r*.1, px, py, r);
+  if (p === 1){ g.addColorStop(0,"#666"); g.addColorStop(1,"#050505"); } else { g.addColorStop(0,"#fff"); g.addColorStop(1,"#cfcfcf"); }
+  ctx.fillStyle = g; ctx.shadowColor = "#0006"; ctx.shadowBlur = 4; ctx.shadowOffsetY = 2;
+  ctx.beginPath(); ctx.arc(px, py, r, 0, 7); ctx.fill();
+  ctx.shadowColor = "transparent"; ctx.globalAlpha = 1;
+}
+function myTurn(){ return !over && !busy && turn === you; }
+function countStones(p){ let c = 0; for (const row of board) for (const v of row) if (v === p) c++; return c; }
+
+function updateHud(msg){
+  $("gameNo").textContent = (gameNo + 1) + "戦目";
+  $("moveLabel").textContent = moves + "手";
+  $("nameOpp").textContent = oppName;
+  $("winsYou").textContent = wins.you; $("winsOpp").textContent = wins.opp;
+  $("cntYou").textContent = countStones(you); $("cntOpp").textContent = countStones(3 - you);
+  $("stoneYou").className = "stone " + (you === 1 ? "b" : "w");
+  $("stoneOpp").className = "stone " + (you === 1 ? "w" : "b");
+  $("seatYou").classList.toggle("turn", !over && turn === you);
+  $("seatOpp").classList.toggle("turn", !over && turn === 3 - you);
+  $("msg").textContent = msg ?? (over ? "" : turn === you ? "あなたの番（" + (you === 1 ? "黒・先手" : "白・後手") + "）" : oppName + "の番");
+}
+
+function show(id){
+  for (const p of ["menu","hostPanel","acceptPanel","infoPanel"]) $(p).style.display = p === id ? "flex" : "none";
+  $("game").style.display = id === "game" ? "flex" : "none";
+  if (id === "game") resize();
+}
+
+// ---------- ルール ----------
+function winLines(x, y, p){
+  const res = [];
+  for (const [dx,dy] of DIRS){
+    const line = [[x,y]];
+    for (const s of [1,-1]){
+      let i = 1;
+      while (inb(x+dx*i*s, y+dy*i*s) && board[y+dy*i*s][x+dx*i*s] === p){ line.push([x+dx*i*s, y+dy*i*s]); i++; }
+    }
+    if (line.length >= 5) res.push(line);
+  }
+  return res;
+}
+
+// ---------- CPU戦 ----------
+function startCpuGame(){
+  board = emptyBoard(); moves = 0; last = null; winLine = null; over = false; busy = false;
+  you = gameNo % 2 === 0 ? 1 : 2; cpu = 3 - you; turn = 1;
+  updateHud(); draw();
+  if (turn === cpu) cpuTurn();
+}
+function place(x, y, p){
+  board[y][x] = p; moves++; last = {x,y};
+  const lines = winLines(x, y, p);
+  if (lines.length){ over = true; winLine = lines; endCpuGame(p); return; }
+  if (moves >= N*N){ over = true; endCpuGame(0); return; }
+  turn = 3 - p; updateHud(); draw();
+  if (turn === cpu) cpuTurn();
+}
+function endCpuGame(winner){
+  if (winner === you) wins.you++; else if (winner) wins.opp++;
+  updateHud(""); draw();
+  const title = !winner ? "引き分け" : winner === you ? "あなたの勝ち！" : "CPUの勝ち";
+  setTimeout(() => showDlg(`<h2>${title}</h2><div>${moves}手</div>`, [["もう一度", "primary", () => { gameNo++; startCpuGame(); }]]), 700);
+}
+function patScore(c, open){
+  if (c >= 5) return 100000;
+  if (c === 4) return open === 2 ? 10000 : open === 1 ? 1500 : 0;
+  if (c === 3) return open === 2 ? 1200 : open === 1 ? 100 : 0;
+  if (c === 2) return open === 2 ? 100 : open === 1 ? 10 : 0;
+  return open ? 1 : 0;
+}
+function cellScore(x, y, p){
+  let total = 0, fours = 0, threes = 0;
+  for (const [dx,dy] of DIRS){
+    let c = 1, open = 0;
+    for (const s of [1,-1]){
+      let i = 1;
+      while (inb(x+dx*i*s, y+dy*i*s) && board[y+dy*i*s][x+dx*i*s] === p){ c++; i++; }
+      if (inb(x+dx*i*s, y+dy*i*s) && board[y+dy*i*s][x+dx*i*s] === 0) open++;
+    }
+    total += patScore(c, open);
+    if (c === 4 && open) fours++; if (c === 3 && open === 2) threes++;
+  }
+  if (fours >= 2 || (fours && threes)) total += 8000; else if (threes >= 2) total += 3000;
+  return total;
+}
+function near(x, y){
+  for (let dy=-2; dy<=2; dy++) for (let dx=-2; dx<=2; dx++){ const nx=x+dx, ny=y+dy; if (inb(nx,ny) && board[ny][nx]) return true; }
+  return false;
+}
+function cpuMove(){
+  const lv = +$("level").value;
+  if (moves === 0) return {x:7, y:7};
+  let best = null;
+  for (let y=0;y<N;y++) for (let x=0;x<N;x++){
+    if (board[y][x] || !near(x,y)) continue;
+    let s = cellScore(x,y,cpu) + cellScore(x,y,you) * (lv === 0 ? 0.6 : 0.95);
+    if (lv === 0) s *= 0.6 + Math.random() * 0.8; else if (lv === 1) s *= 0.9 + Math.random() * 0.2;
+    s -= (Math.abs(x-7) + Math.abs(y-7)) * 0.1;
+    if (!best || s > best.s) best = {x, y, s};
+  }
+  return best;
+}
+function cpuTurn(){
+  busy = true; updateHud();
+  setTimeout(() => { if (over || mode !== "cpu") return; const m = cpuMove(); busy = false; place(m.x, m.y, cpu); }, 450);
+}
+
+// ---------- 対人戦: 着席前 ----------
+function openLobby(){
+  mode = "online"; seated = false; tinfo = null;
+  $("infoNote").textContent = "卓の様子を確認中…";
+  show("infoPanel");
+  post("tableInfo", {tableId});
+}
+function onTableInfo(info){
+  if (mode !== "online" || seated) return;
+  tinfo = info; CUR = info.currency || "$";
+  if (info.status === "empty"){
+    $("hostBal").textContent = money(info.balance);
+    $("betInput").max = info.maxBet;
+    const chips = $("chips"); chips.innerHTML = "";
+    for (const v of info.bets || []){
+      const b = document.createElement("button");
+      b.textContent = v === 0 ? "賭けなし" : money(v);
+      b.onclick = () => { $("betInput").value = v; validateHost(); };
+      chips.appendChild(b);
+    }
+    validateHost();
+    show("hostPanel");
+  } else if (info.status === "host"){
+    $("accHost").textContent = info.hostName || "-";
+    $("accBet").textContent = info.bet > 0 ? money(info.bet) : "賭けなし";
+    $("accBal").textContent = money(info.balance);
+    const short = info.balance < info.bet;
+    $("btnAccept").disabled = short;
+    $("accNote").className = "note" + (short ? " warn" : "");
+    $("accNote").textContent = short ? "所持金が足りません" :
+      (info.bet > 0 ? `対局ごとに ${money(info.bet)} を預けます。勝つと ${money(info.bet * 2 - Math.floor(info.bet * 2 * (info.rake || 0) / 100))} を受け取ります` : "賭けなしの対局です");
+    show("acceptPanel");
+  } else {
+    $("infoNote").textContent = "この卓は満席です";
+    show("infoPanel");
+  }
+  if (pendingNote){
+    for (const id of ["hostNote","accNote","infoNote"]) if ($(id).offsetParent){ $(id).className = "note warn"; $(id).textContent = pendingNote; }
+    pendingNote = null;
+  }
+}
+function betValue(){ const v = Math.floor(Number($("betInput").value)); return Number.isFinite(v) ? v : -1; }
+function validateHost(){
+  if (!tinfo) return;
+  const v = betValue();
+  let err = "";
+  if (v < 0 || v > tinfo.maxBet) err = `0〜${money(tinfo.maxBet)} で入力してください`;
+  else if (v > tinfo.balance) err = "所持金が足りません";
+  $("btnHost").disabled = !!err;
+  $("hostNote").className = "note" + (err ? " warn" : "");
+  $("hostNote").textContent = err || (v > 0 ? `対局ごとに両者から ${money(v)} を預かり、勝者が受け取ります` + (tinfo.rake ? `（手数料 ${tinfo.rake}%）` : "") : "賭けなしで対局します");
+}
+$("betInput").addEventListener("input", validateHost);
+$("btnHost").onclick = () => { const v = betValue(); enterTable(); post("join", {tableId, mode: "host", bet: v}); };
+$("btnAccept").onclick = () => { enterTable(); post("join", {tableId, mode: "accept", bet: tinfo.bet}); };
+for (const id of ["btnBack1","btnBack2","btnBack3"]) $(id).onclick = () => showMenu(tableId);
+
+function enterTable(){
+  seated = true; phase = null; lastState = null;
+  board = emptyBoard(); moves = 0; last = null; winLine = null; over = true; you = 1; gameNo = 0; wins = {you:0, opp:0}; oppName = "相手";
+  $("cpuRow").style.display = "none"; $("onlineRow").style.display = "flex";
+  $("betLabel").textContent = "";
+  show("game"); updateHud("着席中…"); draw();
+}
+
+// ---------- 対人戦: 対局 ----------
+function applyState(s){
+  if (mode !== "online" || !seated) return;
+  lastState = s; phase = s.phase;
+  oppName = s.oppName || "相手"; gameNo = s.gameNo || 0;
+  wins = {you: s.myWins || 0, opp: s.oppWins || 0};
+  $("betLabel").textContent = s.bet > 0 ? "賭け " + money(s.bet) : "賭けなし";
+  $("balLabel").textContent = money(s.balance);
+  if (s.phase === "waiting"){
+    board = emptyBoard(); moves = 0; last = null; winLine = null; over = true; you = 1; turn = 0;
+    oppName = "募集中";
+    updateHud("相手を待っています…（離席で解散）"); draw(); return;
+  }
+  board = s.board; turn = s.turn; you = s.myColor; moves = s.moves; last = s.last || null;
+  winLine = (s.winLine && s.winLine.length) ? s.winLine : null;
+  over = s.phase !== "playing";
+  updateHud(over ? "" : undefined); draw();
+  if (s.phase === "result") setTimeout(() => showResult(s), 700);
+}
+function showResult(s){
+  const r = s.result || {};
+  const mine = r.winnerSeat === s.mySeat;
+  const title = r.draw ? "引き分け" : mine ? "あなたの勝ち！" : oppName + "の勝ち";
+  let moneyLine = "";
+  if (s.bet > 0){
+    if (r.draw) moneyLine = `<div>賭け金 ${money(s.bet)} は返金されました</div>`;
+    else if (mine) moneyLine = `<div class="plus big">+${money(r.payout)}</div>` + (r.rake ? `<div class="note">手数料 ${money(r.rake)}</div>` : "");
+    else moneyLine = `<div class="minus big">-${money(s.bet)}</div>`;
+  }
+  const can = s.balance >= s.bet;
+  showDlg(`<h2>${title}</h2><div>${moves}手</div>${moneyLine}<div class="note">所持金 ${money(s.balance)}</div>` +
+    (can ? "" : `<div class="note warn">所持金が足りないため、再戦すると卓から外れます</div>`),
+    [[s.bet > 0 ? `再戦（${money(s.bet)} を預ける）` : "再戦", "primary", () => { post("next"); updateHud("相手の準備を待っています…"); }],
+     ["離席", "danger", () => doLeave()]]);
+}
+
+// 離席: 対局中は警告を出す
+function requestLeave(after){
+  if (mode === "online" && seated && phase === "playing"){
+    showDlg(`<h2>離席しますか？</h2><div>対局中に離席すると引き分けになり、<br>賭け金は両者に全額返金されます。</div><div class="note warn">相手も卓から外れます</div>`,
+      [["離席する", "danger", () => doLeave(after)], ["キャンセル", "", () => {}]]);
+  } else doLeave(after);
+}
+function doLeave(after){
+  if (seated) post("leave");
+  seated = false; phase = null;
+  if (after) after(); else showMenu(tableId);
+}
+$("leaveBtn").onclick = () => requestLeave();
+
+// ---------- 共通UI ----------
+function showDlg(html, buttons){
+  const d = $("dlg");
+  d.innerHTML = html + `<div class="row">${buttons.map((b, i) => `<button class="${b[1]}" data-i="${i}">${b[0]}</button>`).join("")}</div>`;
+  d.querySelectorAll("button[data-i]").forEach(el => el.onclick = () => { d.close(); buttons[+el.dataset.i][2](); });
+  if (!d.open) d.showModal();
+}
+const inFivem = typeof GetParentResourceName === "function";
+function post(name, data){
+  if (!inFivem) return;
+  fetch("https://" + GetParentResourceName() + "/" + name, {method: "POST", body: JSON.stringify(data || {})}).catch(() => {});
+}
+function showMenu(tid, note){
+  tableId = tid || null; mode = "cpu"; busy = false; over = true; seated = false; phase = null;
+  if ($("dlg").open) $("dlg").close();
+  show("menu");
+  $("btnOnline").disabled = !tableId;
+  $("btnOnline").style.display = inFivem ? "" : "none";
+  $("menuNote").className = "note" + (note ? " warn" : "");
+  $("menuNote").textContent = note || (tableId ? "この卓で2人対戦（賭けあり）ができます" : (inFivem ? "対人戦は卓の近くで E キーから開いてください" : ""));
+}
+function closeUi(){
+  requestLeave(() => {
+    post("close");
+    if (!inFivem){ showMenu(null); return; }
+    $("root").style.display = "none";
+    if ($("dlg").open) $("dlg").close();
+    over = true; busy = false; mode = "cpu";
+  });
+}
+
+$("btnCpu").onclick = () => { mode = "cpu"; oppName = "CPU"; wins = {you:0, opp:0}; gameNo = 0; $("cpuRow").style.display = "flex"; $("onlineRow").style.display = "none"; $("betLabel").textContent = ""; show("game"); startCpuGame(); };
+$("btnOnline").onclick = openLobby;
+$("resetBtn").onclick = () => { wins = {you:0, opp:0}; gameNo = 0; startCpuGame(); };
+$("closeBtn").onclick = closeUi;
+window.addEventListener("keydown", e => {
+  if (e.key !== "Escape" || $("root").style.display === "none") return;
+  e.preventDefault();
+  if ($("dlg").open) return;          // ダイアログは Esc で閉じない (選択させる)
+  closeUi();
+});
+$("dlg").addEventListener("cancel", e => e.preventDefault());
+
+function cellAt(ev){
+  const rect = cv.getBoundingClientRect(), m = size() / (N + 1);
+  const px = (ev.clientX - rect.left) * (size() / rect.width), py = (ev.clientY - rect.top) * (size() / rect.height);
+  const x = Math.round(px / m) - 1, y = Math.round(py / m) - 1;
+  return inb(x,y) ? {x,y} : null;
+}
+cv.addEventListener("mousemove", e => { hover = cellAt(e); draw(); });
+cv.addEventListener("mouseleave", () => { hover = null; draw(); });
+cv.addEventListener("click", e => {
+  if (!myTurn()) return;
+  const c = cellAt(e);
+  if (!c || board[c.y][c.x]) return;
+  if (mode === "online") post("move", c); else place(c.x, c.y, you);
+});
+window.addEventListener("resize", resize);
+
+window.addEventListener("message", e => {
+  const d = e.data || {};
+  if (d.type === "open"){ $("root").style.display = "flex"; showMenu(d.tableId); }
+  else if (d.type === "close"){ $("root").style.display = "none"; if ($("dlg").open) $("dlg").close(); }
+  else if (d.type === "tableInfo") onTableInfo(d.info);
+  else if (d.type === "joinFailed"){ seated = false; pendingNote = lastNotice; openLobby(); }
+  else if (d.type === "kicked"){ seated = false; showMenu(tableId, d.text); }
+  else if (d.type === "state") applyState(d.state);
+  else if (d.type === "notice"){
+    lastNotice = d.text;
+    if (seated) updateHud(d.text);
+    else for (const id of ["hostNote","accNote","infoNote","menuNote"]) if ($(id).offsetParent){ $(id).className = "note warn"; $(id).textContent = d.text; }
+  }
+});
+
+resize();
+if (!inFivem){ document.body.classList.add("standalone"); $("root").style.display = "flex"; showMenu(null); }
+</script>
+</body>
+</html>

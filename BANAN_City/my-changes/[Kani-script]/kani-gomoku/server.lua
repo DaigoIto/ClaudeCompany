@@ -299,6 +299,17 @@ AddEventHandler('playerDropped', function()
     end
 end)
 
+-- キャラクターのログアウト(切断せず別キャラ選択へ戻る場合)。フレームワークのイベントに依存
+local function onLogout(src)
+    if not src then return end
+    removePlayer(src, 'drop')
+    for _, t in pairs(tables) do
+        if t.owner == src then removeTable(t, '卓の持ち主がログアウトしたため、卓が片付けられました') end
+    end
+end
+AddEventHandler('QBCore:Server:OnPlayerUnload', onLogout)   -- QBCore / Qbox(互換イベント)
+AddEventHandler('esx:playerLogout', onLogout)               -- ESX
+
 ---------------------------------------------------------------- アイテムで置く卓
 local nextId = 1000
 
@@ -334,7 +345,11 @@ end)
 RegisterNetEvent('kani-gomoku:pickup', function(tid)
     local src = source
     local t = tables[tonumber(tid)]
-    if not t or t.owner ~= src then return end
+    if not t or not t.owner then return end
+    if Config.Item.OnlyOwnerPickup and t.owner ~= src and not IsPlayerAceAllowed(src, 'command.gomokupickup') then
+        return notice(src, '他の人の卓は片付けられません')
+    end
+    if #(GetEntityCoords(GetPlayerPed(src)) - t.coords) > 4.0 then return end
     if t.seats[1] or t.seats[2] then return notice(src, '人が座っている間は片付けられません') end
     tables[t.id] = nil
     syncTables()

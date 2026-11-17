@@ -7,7 +7,7 @@ from mathutils import Vector
 addon_utils.enable('Sollumz')
 args = sys.argv[sys.argv.index('--') + 1:]
 OUT, FMT = args[0], (args[1] if len(args) > 1 else 'CWXML')
-ASSET = r"C:\Users\tohay\Documents\ClaudeCompany\fivem-server\assets\kani-gomoku"
+ASSET = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))  # BANAN_City/assets/kani-gomoku
 TEX = os.path.join(OUT, 'tex'); os.makedirs(TEX, exist_ok=True)
 NAMES = ['kani_gomoku_table', 'kani_goban', 'kani_stone_black', 'kani_stone_white']
 

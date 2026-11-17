@@ -391,9 +391,82 @@ RegisterNetEvent('kani-gomoku:kicked', function(reason)
     end
 end)
 
+---------------------------------------------------------------- ターゲット(Altの目)で片付け
+-- ox_target / qb-target がある場合、置いた卓に「片付ける」を出す。空いている卓だけ (kani-othello と同じ)
+local targetZones = {}   -- [tid] = { kind = 'ox'|'qb', id = zoneId or name }
+
+local function targetKind()
+    if not Config.Item.UseTarget then return nil end
+    if GetResourceState('ox_target') == 'started' then return 'ox' end
+    if GetResourceState('qb-target') == 'started' then return 'qb' end
+end
+
+local function tableIsEmpty(tid)
+    local bd = boards[tid]
+    return not bd or (not bd.names[1] and not bd.names[2])
+end
+
+local function removeTargetZone(tid)
+    local z = targetZones[tid]
+    if not z then return end
+    targetZones[tid] = nil
+    if z.kind == 'ox' then
+        pcall(function() exports.ox_target:removeZone(z.id) end)
+    else
+        pcall(function() exports['qb-target']:RemoveZone(z.id) end)
+    end
+end
+
+local function addTargetZone(t)
+    if targetZones[t.id] then return end
+    local kind = targetKind()
+    if not kind then return end
+    local tid = t.id
+    local center = vec3(t.coords.x, t.coords.y, t.coords.z - 1.0 + 0.4)
+    local label = t.label .. 'を片付ける'
+    local function pick() TriggerServerEvent('kani-gomoku:pickup', tid) end
+    local function can() return not isOpen and not seated and tableIsEmpty(tid) end
+    if kind == 'ox' then
+        local id = exports.ox_target:addSphereZone({
+            coords = center, radius = 0.9, debug = false,
+            options = { {
+                name = 'gomoku_pickup_' .. tid, icon = 'fa-solid fa-hand', label = label,
+                distance = 2.0, canInteract = can, onSelect = pick,
+            } },
+        })
+        targetZones[tid] = { kind = 'ox', id = id }
+    else
+        local name = 'gomoku_pickup_' .. tid
+        exports['qb-target']:AddCircleZone(name, center, 0.9, { name = name, useZ = true, debugPoly = false }, {
+            options = { { type = 'client', icon = 'fas fa-hand', label = label, canInteract = can, action = pick } },
+            distance = 2.0,
+        })
+        targetZones[tid] = { kind = 'qb', id = name }
+    end
+end
+
+-- 置いた卓(持ち主あり)だけにゾーンを張る。持ち主以外の判定はサーバー側
+local function refreshTargets()
+    local keep = {}
+    for _, t in ipairs(tableList) do
+        if t.owner then keep[t.id] = true addTargetZone(t) end
+    end
+    for tid in pairs(targetZones) do
+        if not keep[tid] then removeTargetZone(tid) end
+    end
+end
+
+AddEventHandler('onClientResourceStart', function(res)
+    if res == 'ox_target' or res == 'qb-target' then
+        targetZones = {}
+        refreshTargets()
+    end
+end)
+
 -- 卓の一覧 (常設 + アイテムで置かれた卓)
 RegisterNetEvent('kani-gomoku:tables', function(list)
     tableList = list or {}
+    refreshTargets()
     -- 着席中の卓が消えたら立つ
     if currentTable and not tableById(currentTable) then
         currentTable, mySeat = nil, nil
@@ -442,4 +515,5 @@ AddEventHandler('onResourceStop', function(res)
     SetNuiFocus(false, false)
     standUp()
     for tid in pairs(spawned) do despawnTable(tid) end
+    for tid in pairs(targetZones) do removeTargetZone(tid) end
 end)
