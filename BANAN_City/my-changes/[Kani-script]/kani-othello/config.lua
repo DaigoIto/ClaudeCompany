@@ -43,7 +43,9 @@ Config.Tables = {
 -- kani_ で始まるものはこのリソースの stream/ に入っている自作モデル(卓は五目並べの卓を黒くしたもの)
 -- vw_ で始まるものはカジノDLC(ゲームビルド2060以上)が必要。無ければ次の候補になる
 Config.TableModels = { 'kani_othello_table', 'vw_prop_casino_3cardpoker_01', 'prop_table_03' }
-Config.ChairModels = { 'vw_prop_casino_chair_01a', 'prop_chair_01a' }
+-- 椅子は木製の prop_chair 系。先頭で存在するものが使われる(02 が無ければ 03、…の順)
+-- 見た目や座る高さが合わなければ、先頭を入れ替えるか SitZOffset / ChairHeadingOffset で調整
+Config.ChairModels = { 'prop_chair_02', 'prop_chair_03', 'prop_chair_04a', 'prop_chair_04b', 'prop_chair_05', 'prop_chair_01a' }
 
 -- 自作のオセロ盤と石(円盤)。読み込めなければ下の Config.Board の簡易描画になる
 -- 石の番号: 1 = 白(先手), 2 = 黒(後手)
