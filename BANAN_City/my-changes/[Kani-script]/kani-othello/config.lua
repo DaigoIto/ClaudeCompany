@@ -1,87 +1,67 @@
 Config = {}
 
+Config.Command   = false        -- どこでも CPU 戦を開けるコマンド名 (例 'othello')。false で無し
 Config.UseKey    = 38           -- 卓で押すキー (38 = E)
 Config.DrawDist  = 12.0         -- マーカーを描画する距離
 Config.UseDist   = 1.8          -- 操作できる距離
 Config.BoardDist = 15.0         -- 3D盤面を描画する距離
 
--- ================================ 賭け(対人戦のみ。CPU戦は賭けなし) ================================
--- 流れ
---   1. 卓に最初に座った人が賭け金を自由入力(0〜MaxBet の整数。0 = 賭けなし)
---   2. 2人目は賭け金を確認して「承諾して着席」(承諾した金額が卓の現在の金額と違えば拒否)
---   3. 対局開始時(再戦ごと)に両者から賭け金を預かる
---   4. 勝者が預かり金を全額(手数料を引いて)受け取る。引き分けは両者に返金
---   5. 対局中の退席・切断は引き分け扱い: 両者に全額返金(没収なし)。相手も卓から外れる
---   6. 再戦時に所持金が足りない人は卓から外れる(相手も外れる)
-Config.MaxBet   = 50000000   -- 賭け金の上限
-Config.Bets     = { 0, 1000, 10000, 100000, 1000000, 10000000 }   -- 入力欄の横に出るクイック選択ボタン
-Config.Rake     = 0          -- 手数料(%)。勝者の受取額から引く。0なら全額
-Config.Currency = '$'        -- 通貨記号(表示用)
+-- 賭け (対人戦のみ)
+Config.MaxBet   = 50000000      -- 賭け金の上限。0〜上限の整数を入力でき、0 は賭けなし
+Config.Bets     = { 0, 1000, 10000, 100000, 1000000, 10000000 }  -- クイック選択ボタン
+Config.Rake     = 0             -- 手数料(%)。勝者の受取額から引く
+Config.Currency = '$'           -- 通貨記号(表示用)
 
--- 金銭の扱い。Qbox / QBCore / ESX は自動検出。どれも無ければ内蔵の財布(license ごとに保存)
---   内蔵財布の操作: /othellowallet(所持金表示) / othellogive <ID> <金額>(付与。コンソールか ace command.othellogive)
 Config.Money = {
-    Framework    = 'auto',   -- 'auto' / 'qbx' / 'qb' / 'esx' / 'standalone'
-    Account      = 'cash',   -- 'cash' or 'bank'
-    StartBalance = 10000,    -- 内蔵財布の初期所持金(初回のみ)
+    Framework    = 'auto',      -- auto / qbox / qbcore / esx / wallet
+    Account      = 'cash',      -- cash / bank
+    StartBalance = 10000,       -- 内蔵の財布(wallet)の初期所持金(初回のみ)
 }
--- ====================================================================================================
 
--- 固定の卓(ワールドに自動で置かれる卓)。今は無し = アイテム(Config.Placeable)で置いた卓だけが出る
--- 固定卓が欲しいときは下のコメントを外して座標を設定 (id は 1〜999 で重複させない)
+-- アイテム「オセロ卓」: 使うと目の前に卓を置く (kani-gomoku と同じルール)
+-- アイテムは減らない。1人1卓まで。空いていれば G / ターゲット(Altの目)で片付け
+-- 持ち主のログアウト・切断、サーバー停止で卓は消える(保存しない)
+-- アイテム定義(ox_inventory の data/items.lua)はサーバー側で追加が必要 → my-changes/導入メモ_kani-othello.md
+Config.Item = {
+    Name       = 'othello_table',  -- インベントリのアイテム名
+    Label      = 'オセロ卓',     -- 卓の上に出る名前
+    MaxPlaced  = 10,            -- サーバー全体で置ける卓の数
+    Distance   = 1.7,           -- 自分から卓の中心までの距離(m)
+    MinGap     = 3.5,           -- 他の卓とあける間隔(m)
+    PickupKey  = 47,            -- 片付けるキー (47 = G)
+    UseTarget  = true,          -- ターゲット(Altの目: ox_target / qb-target)からも片付けられるようにする
+    OnlyOwnerPickup = true,     -- 置いた本人だけ片付けられる。管理者(ace command.othellopickup)は常に可
+}
+
+-- 常設の卓(任意)。座標を書けばアイテム無しでも置いておける (id は 1〜999)
 -- coords: 卓の中心(プレイヤーが立つ高さ = 地面+約1m), heading: 卓の向き(席1→席2 がこの向き)
 Config.Tables = {
-    -- { id = 1, label = 'オセロ卓', coords = vec3(1698.0, 3256.0, 41.1), heading = 0.0 },
+    -- { id = 1, label = 'オセロ卓', coords = vec3(1694.0, 3256.0, 41.1), heading = 0.0 },
 }
 
--- アイテムで置ける机(可搬式)。アイテムを使うと目の前に卓が置かれる(アイテムは消費しない)。
--- 空いていれば「G」/ターゲットで片付け。持ち主のログアウト・切断、サーバー停止で卓は消える(保存しない)
--- アイテム定義(ox_inventory の data/items.lua など)はサーバー側の別リソースに追加が必要 → README 参照
-Config.Placeable = {
-    Item            = 'othello_table',   -- アイテム名
-    Label           = 'オセロ卓',
-    Distance        = 1.4,               -- 使った人の何m前に置くか
-    MaxPerPlayer    = 1,                 -- 1人が同時に置ける台数
-    MaxTotal        = 20,                -- サーバー全体の上限
-    MinSpacing      = 2.5,               -- 他の卓との最小距離(m)。椅子が重ならないように
-    PickupKey       = 47,                -- 片付けるキー (47 = G)
-    UseTarget       = true,              -- ターゲット(Altの目: ox_target / qb-target)からも片付けられるようにする
-    OnlyOwnerPickup = true,              -- 置いた本人(license)だけ片付けられる。管理者(ace command.othellopickup)は常に可
-}
-
--- 黒い机(スクリプトで描画。モデルは使わない)。サイズ・色はここで調整
-Config.TableDesign = {
-    size = 0.90,        -- 天板の一辺(m)
-    thickness = 0.06,   -- 天板の厚み(m)
-    height = 0.75,      -- 床から天板の上面までの高さ(m)
-    legSize = 0.07,     -- 脚の太さ(m)
-    legInset = 0.06,    -- 脚を天板の角から内側へ寄せる量(m)
-    topColor  = { 24, 24, 28 },
-    sideColor = { 10, 10, 12 },
-    legColor  = { 14, 14, 16 },
-    edgeColor = { 75, 75, 85 },   -- 天板の縁の線
-    -- 描画だけの机には当たり判定が無い。歩いて通り抜けるのが気になるなら、透明な当たり判定用プロップを指定
-    -- (例 'prop_table_03'。大きさが合わなければ使わない)。nil なら無し
-    collisionModel = nil,
-}
-
--- 椅子のモデル。先頭から順に「ゲームに存在するもの」を使う
+-- 卓・椅子のモデル。先頭から順に「ゲームに存在するもの」を使う
+-- kani_ で始まるものはこのリソースの stream/ に入っている自作モデル(卓は五目並べの卓を黒くしたもの)
+-- vw_ で始まるものはカジノDLC(ゲームビルド2060以上)が必要。無ければ次の候補になる
+Config.TableModels = { 'kani_othello_table', 'vw_prop_casino_3cardpoker_01', 'prop_table_03' }
 Config.ChairModels = { 'vw_prop_casino_chair_01a', 'prop_chair_01a' }
 
-Config.SeatDistance       = 0.95
+-- 自作のオセロ盤と石(円盤)。読み込めなければ下の Config.Board の簡易描画になる
+-- 石の番号: 1 = 白(先手), 2 = 黒(後手)
+Config.BoardModel  = 'kani_othello_board'
+Config.StoneModels = { 'kani_disc_white', 'kani_disc_black' }  -- 白, 黒
+
+Config.SeatDistance       = 0.95  -- 卓の中心から椅子までの距離(m)
 Config.ChairHeadingOffset = 0.0   -- 椅子が後ろ向きに出たら 180.0 に
 Config.SitScenario        = 'PROP_HUMAN_SEAT_CHAIR_MP_PLAYER'
-Config.SitZOffset         = 0.5
+Config.SitZOffset         = 0.5   -- 座る高さの調整(椅子の位置からの上下)
 
--- 卓の上に置く3D盤面 (8x8)
+-- 卓の上の3D盤面 (8×8)
+-- size はマス目全体の一辺(自作のオセロ盤 kani_othello_board は 0.60 でマスに合う)
+-- zOffset / stoneScale / color / lineColor は自作の盤が使えないときの簡易描画用
 Config.Board = {
-    size        = 0.60,   -- 盤面(マス目部分)の一辺(m)
-    zOffset     = 0.002,  -- 天板からの浮かせ量(m)
-    frameWidth  = 0.035,  -- 木の枠の幅(m)
-    stoneScale  = 0.058,  -- 石の直径(m)。大きすぎ/小さすぎたらここを調整
-    stoneHeight = 0.012,  -- 石の厚み(m)
-    color       = { 20, 110, 60 },    -- 盤面(緑)
-    frameColor  = { 70, 42, 20 },     -- 枠(木)
-    lineColor   = { 5, 40, 20 },
-    starColor   = { 5, 40, 20 },
+    size       = 0.60,   -- マス目の一辺(m)。1マス = size / 8
+    zOffset    = 0.01,   -- 卓の天板からの浮かせ量(m)
+    stoneScale = 0.058,  -- 石の直径(m)。大きすぎ/小さすぎたらここを調整
+    color      = { 20, 110, 60 },
+    lineColor  = { 5, 40, 20 },
 }

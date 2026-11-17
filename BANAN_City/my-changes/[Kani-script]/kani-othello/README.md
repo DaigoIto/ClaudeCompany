@@ -1,68 +1,32 @@
 # kani-othello — オセロ for FiveM
 
-kani-gomoku と同じ構成。フレームワーク非依存。
+フレームワーク非依存(Qbox/ESX/QBCore どれでも/なしでも動く)。kani-gomoku と同じ構成。
 
-- CPU戦も卓から(卓のメニュー →「CPUと対戦」)。卓を開くコマンドは無い
-- 卓の近くで E : 2人対戦。卓はアイテムで置く(下記)。固定卓は初期状態では無し(必要なら `Config.Tables` に追加)。判定はサーバー側で管理
-- ルール: 8×8。白(先手)が先に打ち、後手は黒。置ける所が無ければ自動パス、両者置けなければ終局。石の多い方が勝ち
-- 先手後手は1戦ごとに交代。勝ち数を表示
+- アイテム「オセロ卓」(`othello_table`)を使う : 目の前に卓を置く。空いていれば G / ターゲット(Altの目)で片付け
+  - アイテムは減らない。置けるのは1人1卓、サーバー全体で `Config.Item.MaxPlaced` 卓まで。持ち主のログアウト・切断で卓も消える
+  - インベントリへの登録手順は `BANAN_City/my-changes/導入メモ_kani-othello.md`(ox_inventory 用の定義。アイコンは同じ場所の `othello_table.png`)
+- 卓の近くで E : 2人対戦(賭けあり)か CPU 戦(強さ3段階)。2人座ると開始、判定・賭け金はサーバー側で管理
+- 常設の卓も `Config.Tables` に座標を書けば置ける。`Config.Command` にコマンド名を入れると、どこでも CPU 戦を開ける(初期値は無し)
+- ルール: 8×8。白が先手・黒が後手。置ける所が無ければ自動パス、両者置けなければ終局で石の多い方が勝ち。1戦ごとに先手(白)を交代し、勝ち数を表示
+
+## 賭け (対人戦)
+設定は `config.lua` の `MaxBet` / `Bets` / `Rake` / `Currency` / `Money`。
+お金は Qbox → QBCore → ESX の順に自動検出し、どれも無ければ内蔵の財布(KVP保存)を使う(`money.lua`)。
+
+1. 卓に最初に座った人が賭け金を入力(0〜MaxBet、0 は賭けなし)
+2. 2人目は金額を確認して「承諾して着席」。承諾額が卓の金額と違えば拒否
+3. 対局開始時と再戦のたびに両者から賭け金を預かる
+4. 勝者が預かり金を全額受け取る(Rake% を引く)。引き分けは両者に返金
+5. 対局中の退席・切断は引き分け扱いで両者に全額返金(没収なし)。退席前に警告。退席すると相手も卓から外れる
+6. 再戦時に所持金が足りない人がいると、両者とも卓から外れる
+
+## 卓
+- 卓・オセロ盤・石は自作モデル(`stream/` の `kani_othello_table` / `kani_othello_board` / `kani_disc_white` / `kani_disc_black`、定義は `kani_othello.ytyp`)。卓は五目並べの卓を黒檀色にしたもので、当たり判定あり。椅子はGTAの既存モデル
+- 自作モデルが読めないときは、卓はGTAの既存モデル、盤と石は簡易描画(`Config.Board`)に切り替える
+- モデルの元データと変換スクリプトは `BANAN_City/assets/kani-othello/`(サーバーには上げない。`make_blend.py` で元データを作り、`sollumz/build_sollumz.py` を Blender + Sollumz で実行すると ydr/ytyp を作り直せる)
+- 対人戦で着席すると席1/席2の椅子に座るアニメーション。閉じると立つ
+- 卓の上に3D盤面。対局中の石・最終手・対局者名が周りの全員に見える
+- 椅子の向き・座る高さ・石の大きさは `config.lua` で調整
 
 ## 導入
-`resources/[local]/kani-othello` を置いて `server.cfg` に `ensure kani-othello`。
-卓の座標・プロップ・キーは `config.lua`。
-
-## 卓と盤面(3D)
-- 机はモデルを使わず、スクリプトで黒い天板+4本脚を描画(`Config.TableDesign` でサイズ・色・高さを調整)。当たり判定は無し(通り抜け可)。必要なら `collisionModel` に透明な当たり判定用プロップを指定
-- 盤面は 木の枠+緑の盤面+罫線+星+円盤状の石(`Config.Board`)。直前の手に赤いマーカー
-- 椅子は既存モデル(`Config.ChairModels`)
-
-## アイテムで机を出す(可搬式の卓)
-- アイテム `othello_table`(`Config.Placeable.Item`)を使うと、目の前(1.4m)に卓が置かれる。**アイテムは消費しない**
-- 空いている卓は、横に立って **G**、またはターゲット(**Alt の目**。ox_target / qb-target があるとき)の「片付ける」で消せる(置いた本人のみ。管理者は ace `command.othellopickup` で可)
-- 1人1台まで・サーバー全体20台まで・他の卓と2.5m以上離す
-- **卓は保存しない**: 持ち主のログアウト(キャラ切替含む)・切断、サーバー/リソースの停止で、卓は自動で片付く。座っていた人は退席扱い(対局中なら賭け金は返金)
-- 卓を出すコマンドは無い(アイテムのみ)。アイテムの仕組みが無いスタンドアロン構成では卓を置けない
-- 使えるアイテムの登録は Qbox / QBCore / ESX は自動
-- ログアウトの検知は、フレームワークのイベント(`QBCore:Server:OnPlayerUnload` / `esx:playerLogout`)と切断(`playerDropped`)に依存
-
-### アイテム定義(サーバー側の別リソースに追加が必要)
-ox_inventory の `data/items.lua`:
-```lua
-['othello_table'] = {
-    label = 'オセロ卓',
-    weight = 5000,
-    stack = false,
-    close = true,
-    consume = 0,   -- 消費はこのリソースが扱わない(アイテムは減らない)ので ox 側でも消さない
-    description = '使うと目の前にオセロの卓を置く。卓の横で G(またはAltの目)で片付け',
-    server = { export = 'kani-othello.othello_table' },
-},
-```
-- QBCore は `qb-core/shared/items.lua`(`useable = true`)、ESX は `items` テーブルに同名のアイテムを追加。「使う」の登録はこのリソースが自動で行う
-- 二重に反応しても、1.5秒以内の連続使用は無視されるので卓は1台しか置かれない
-- 友人サーバー(BANAN_City)では、これらは `[Kani-script]` の外なので、サーバー管理者側で追加が必要
-
-## 賭け(対人戦のみ。CPU戦は賭けなし)
-設定は `config.lua` の「賭け」ブロックに集約。
-
-| 設定 | 初期値 | 内容 |
-|---|---|---|
-| `Config.MaxBet` | 50,000,000 | 賭け金の上限(0〜上限の整数を自由入力。0 = 賭けなし) |
-| `Config.Bets` | 0 / 1千 / 1万 / 10万 / 100万 / 1000万 | 入力欄横のクイック選択ボタン |
-| `Config.Rake` | 0 | 手数料(%)。勝者の受取額から引く |
-| `Config.Currency` | `$` | 通貨記号(表示用) |
-| `Config.Money.Framework` | `auto` | `auto` / `qbx` / `qb` / `esx` / `standalone` |
-| `Config.Money.Account` | `cash` | `cash` or `bank` |
-| `Config.Money.StartBalance` | 10000 | 内蔵財布の初期所持金(初回のみ) |
-
-### ルール
-1. 卓に最初に座った人が賭け金を入力。2人目は金額を確認して「承諾して着席」(承諾額が卓の現在額と違えば拒否)
-2. 対局開始時(再戦ごと)に両者から賭け金を預かる
-3. 勝者が預かり金を全額(手数料を引いて)受け取る。引き分けは返金
-4. 対局中の退席・切断は引き分け扱いで両者に全額返金(没収なし)。退席前に警告ダイアログが出る。どちらかが退席・切断すると相手も卓から外れる
-5. 再戦時に所持金が足りない人は卓から外れる(相手も外れる)
-
-### 金銭
-- Qbox / QBCore / ESX を自動検出。どれも無ければ内蔵の財布(license ごとに保存)
-- 内蔵財布: `/othellowallet` で所持金表示、`othellogive <ID> <金額>` で付与(サーバーコンソール、または ace `command.othellogive`)
-- 切断時の返金: 切断した側の返金は、フレームワークが切断時にプレイヤー情報を先に消すと失敗することがある(残った側は確実)
+手順・友人に頼むこと・確認項目は `BANAN_City/my-changes/導入メモ_kani-othello.md`(kani-gomoku と同じ形式)

@@ -4,36 +4,195 @@ local DIRS = { {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {1,-1}, {-1,1}, {-1,-1} }
 local tables = {}      -- [tableId] = state
 local seatOf = {}      -- [src] = { tid = , seat = }
 
-for _, t in ipairs(Config.Tables) do
-    tables[t.id] = { id = t.id, seats = {}, names = {}, phase = 'waiting' }
+local function resetTable(t)
+    t.seats, t.names = {}, {}
+    t.phase, t.board, t.result, t.passed, t.last = 'empty', nil, nil, nil, nil
+    t.wins, t.gameNo, t.ready = { 0, 0 }, 0, {}
+    t.bet, t.escrow = 0, {}
 end
 
+local function newTable(id, label, coords, heading, owner)
+    local t = { id = id, label = label, coords = coords, heading = heading or 0.0, owner = owner }
+    resetTable(t)
+    tables[id] = t
+    return t
+end
+
+for _, tc in ipairs(Config.Tables) do newTable(tc.id, tc.label, tc.coords, tc.heading) end
+
+-- クライアントへ配る卓の一覧
+local function tableList()
+    local list = {}
+    for _, t in pairs(tables) do
+        list[#list + 1] = { id = t.id, label = t.label, coords = t.coords, heading = t.heading, owner = t.owner or false }
+    end
+    return list
+end
+
+local function syncTables(target)
+    TriggerClientEvent('kani-othello:tables', target or -1, tableList())
+end
+
+local function fmt(n)
+    local s = tostring(math.floor(n)):reverse():gsub('(%d%d%d)', '%1,'):reverse():gsub('^,', '')
+    return Config.Currency .. s
+end
+
+local function notice(src, text) TriggerClientEvent('kani-othello:notice', src, text) end
+
+-- 石の番号: 1 = 白(先手), 2 = 黒(後手)
 local function newBoard()
     local b = {}
     for y = 1, N do
         b[y] = {}
         for x = 1, N do b[y][x] = 0 end
     end
-    b[4][4], b[5][5] = 1, 1   -- 1=白(先手) 2=黒(後手)
+    b[4][4], b[5][5] = 1, 1
     b[4][5], b[5][4] = 2, 2
     return b
 end
 
-local function resetMatch(t)
-    t.game = 0
-    t.wins = { 0, 0 }
-    t.ready = {}
-end
-
--- 1=白(先手) 2=黒(後手)。game が偶数のとき席1が先手、1戦ごとに交代
+-- 1局ごとに先手(白)を交代: gameNo が偶数なら席1が白(先手)
 local function colorOfSeat(t, seat)
-    local seat1First = (t.game % 2 == 0)
+    local seat1First = (t.gameNo % 2 == 0)
     if seat == 1 then return seat1First and 1 or 2 end
     return seat1First and 2 or 1
 end
 
-local function seatOfColor(t, color)
-    return colorOfSeat(t, 1) == color and 1 or 2
+local function publicState(t, seat)
+    local src = t.seats[seat]
+    return {
+        phase    = t.phase,
+        mySeat   = seat,
+        myColor  = t.board and colorOfSeat(t, seat) or nil,
+        turn     = t.turn,
+        board    = t.board,
+        last     = t.last,
+        passed   = t.passed,
+        moves    = t.moves,
+        gameNo   = t.gameNo,
+        myWins   = t.wins[seat],
+        oppWins  = t.wins[3 - seat],
+        oppName  = t.names[3 - seat] or '相手',
+        result   = t.result,
+        bet      = t.bet,
+        balance  = src and Money.balance(src) or 0,
+    }
+end
+
+-- 見物用: 卓の盤面と対局者名を全員へ (64文字の '0'/'1'/'2')
+local function encodeBoard(board)
+    if not board then return nil end
+    local parts = {}
+    for y = 1, N do
+        for x = 1, N do parts[#parts + 1] = tostring(board[y][x]) end
+    end
+    return table.concat(parts)
+end
+
+local function syncBoard(t, target)
+    TriggerClientEvent('kani-othello:board', target or -1, t.id, encodeBoard(t.board), { t.names[1] or false, t.names[2] or false }, t.last)
+end
+
+local function broadcast(t)
+    syncBoard(t)
+    for seat = 1, 2 do
+        local src = t.seats[seat]
+        if src then TriggerClientEvent('kani-othello:state', src, publicState(t, seat)) end
+    end
+end
+
+---------------------------------------------------------------- 賭け金
+-- 両者から預かる。どちらかが払えなければ払えた側に返して false
+local function collectBets(t)
+    if t.bet <= 0 then t.escrow = {} return true end
+    t.escrow = {}
+    for seat = 1, 2 do
+        if Money.remove(t.seats[seat], t.bet, 'kani-othello: 賭け金') then
+            t.escrow[seat] = t.bet
+        else
+            for s, amt in pairs(t.escrow) do Money.add(t.seats[s], amt, 'kani-othello: 返金') end
+            t.escrow = {}
+            return false, seat
+        end
+    end
+    return true
+end
+
+local function refundAll(t)
+    for seat, amt in pairs(t.escrow) do
+        if t.seats[seat] then Money.add(t.seats[seat], amt, 'kani-othello: 返金') end
+    end
+    t.escrow = {}
+end
+
+-- 勝者に預かり金を全額(手数料を引いて)渡す。受取額と手数料を返す
+local function payWinner(t, seat)
+    local pot = 0
+    for _, amt in pairs(t.escrow) do pot = pot + amt end
+    t.escrow = {}
+    local rake = math.floor(pot * (Config.Rake or 0) / 100)
+    local pay = pot - rake
+    if pay > 0 then Money.add(t.seats[seat], pay, 'kani-othello: 勝利') end
+    return pay, rake
+end
+
+---------------------------------------------------------------- 卓から外す
+local function kick(src, reason)
+    seatOf[src] = nil
+    TriggerClientEvent('kani-othello:kicked', src, reason)
+end
+
+-- 1人でも抜けたら卓を解散 (対局中なら引き分け扱いで全額返金)
+local function dissolve(t, leaverSeat, reasonForOther)
+    if t.phase == 'playing' then refundAll(t) end
+    t.escrow = {}
+    for seat = 1, 2 do
+        local src = t.seats[seat]
+        if src then
+            if seat == leaverSeat then
+                seatOf[src] = nil
+            else
+                kick(src, reasonForOther)
+            end
+        end
+    end
+    resetTable(t)
+    syncBoard(t)
+end
+
+local function removePlayer(src, why)
+    local info = seatOf[src]
+    if not info then return end
+    local t = tables[info.tid]
+    if not t then seatOf[src] = nil return end
+    local wasPlaying = t.phase == 'playing'
+    local msg
+    if wasPlaying then
+        msg = (why == 'drop' and '相手が切断しました。' or '相手が退席しました。') .. '引き分け扱いで賭け金は全額返金されました'
+    else
+        msg = why == 'drop' and '相手が切断したため、卓を離れました' or '相手が退席したため、卓を離れました'
+    end
+    dissolve(t, info.seat, msg)
+    if wasPlaying and why ~= 'drop' then notice(src, '引き分け扱いで賭け金は全額返金されました') end
+end
+
+---------------------------------------------------------------- 対局
+local function startGame(t)
+    local ok, badSeat = collectBets(t)
+    if not ok then
+        local bad, other = t.seats[badSeat], t.seats[3 - badSeat]
+        if bad then kick(bad, '所持金が足りないため、卓を離れました') end
+        if other then kick(other, '相手の所持金が足りないため、卓を離れました') end
+        resetTable(t)
+        syncBoard(t)
+        return false
+    end
+    t.board = newBoard()
+    t.turn, t.moves, t.last, t.passed, t.result = 1, 0, nil, nil, nil
+    t.phase = 'playing'
+    t.ready = {}
+    return true
 end
 
 -- (x,y) に color が置いたとき裏返る石のリスト (1始まり)。置けなければ空
@@ -64,230 +223,165 @@ local function hasMove(board, color)
 end
 
 local function countStones(board)
-    local b, w = 0, 0
+    local w, b = 0, 0   -- 白(1), 黒(2)
     for y = 1, N do
         for x = 1, N do
-            if board[y][x] == 1 then b = b + 1 elseif board[y][x] == 2 then w = w + 1 end
+            if board[y][x] == 1 then w = w + 1 elseif board[y][x] == 2 then b = b + 1 end
         end
     end
-    return b, w
+    return w, b
 end
 
-local function startRound(t)
-    t.board = newBoard()
-    t.turn, t.moves, t.last, t.result, t.passed = 1, 0, nil, nil, nil
-    t.phase = 'playing'
-    t.ready = {}
-end
-
-local function publicState(t, seat)
-    return {
-        phase = t.phase,
-        mySeat = seat,
-        myColor = t.board and colorOfSeat(t, seat) or nil,
-        turn = t.turn,
-        board = t.board,
-        last = t.last,
-        passed = t.passed,
-        moves = t.moves,
-        game = (t.game or 0) + 1,
-        myWins = t.wins and t.wins[seat],
-        oppWins = t.wins and t.wins[3 - seat],
-        oppName = t.names[3 - seat] or '相手',
-        bet = t.bet or 0,
-        result = t.result,
-    }
-end
-
--- 見物用: 卓の盤面と対局者名を全員へ (64文字の '0'/'1'/'2')
-local function encodeBoard(board)
-    if not board then return nil end
-    local parts = {}
-    for y = 1, N do
-        for x = 1, N do parts[#parts + 1] = tostring(board[y][x]) end
-    end
-    return table.concat(parts)
-end
-
-local function syncBoard(t, target)
-    TriggerClientEvent('kani-othello:board', target or -1, t.id, encodeBoard(t.board), { t.names[1] or false, t.names[2] or false }, t.last, t.bet)
-end
-
-local function sendMoney(src)
-    if src then TriggerClientEvent('kani-othello:money', src, Money.get(src)) end
-end
-
-local function broadcast(t)
-    syncBoard(t)
-    for seat = 1, 2 do
-        local src = t.seats[seat]
-        if src then TriggerClientEvent('kani-othello:state', src, publicState(t, seat)) end
-    end
-end
-
-local function finishRound(t)
-    local b, w = countStones(t.board)
-    -- b = 白(先手)の数, w = 黒(後手)の数
-    local res = { winnerSeat = 0, black = w, white = b }
-    if b ~= w then
-        local wseat = seatOfColor(t, b > w and 1 or 2)
-        res.winnerSeat = wseat
-        t.wins[wseat] = t.wins[wseat] + 1
+-- 終局: 石の多い方が勝ち。同数は引き分け
+local function finishGame(t)
+    local w, b = countStones(t.board)
+    local res = { bet = t.bet, white = w, black = b, winnerSeat = 0 }
+    if w ~= b then
+        local winnerSeat
+        for seat = 1, 2 do
+            if colorOfSeat(t, seat) == (w > b and 1 or 2) then winnerSeat = seat end
+        end
+        res.winnerSeat = winnerSeat
+        t.wins[winnerSeat] = t.wins[winnerSeat] + 1
+        res.payout, res.rake = payWinner(t, winnerSeat)
     else
         res.draw = true
+        refundAll(t)
     end
-
-    -- 賭け金の精算
-    local bet = t.bet or 0
-    res.bet = bet
-    if bet > 0 and (t.pot or 0) > 0 then
-        if res.draw then
-            for seat = 1, 2 do
-                if t.seats[seat] then Money.add(t.seats[seat], bet, 'othello draw refund') end
-            end
-        else
-            local rake = math.floor(t.pot * (Config.Rake or 0) / 100)
-            res.payout, res.rake = t.pot - rake, rake
-            Money.add(t.seats[res.winnerSeat], res.payout, 'othello win')
-        end
-        t.pot = 0
-        for seat = 1, 2 do sendMoney(t.seats[seat]) end
-    end
-
     t.result = res
     t.phase = 'result'
 end
 
--- src が退席(切断)したら、相手も卓から外してメニューへ戻す。otherText: 相手に出す理由(省略可)
-local function removePlayer(src, otherText)
-    local info = seatOf[src]
-    if not info then return end
-    local t = tables[info.tid]
-    seatOf[src] = nil
-    if not t then return end
-    local other = t.seats[3 - info.seat]
-
-    -- 対局中の退席・切断は引き分け扱い: 預かっている賭け金は両者へ全額返金 (没収なし)
-    local text = otherText or '相手が退席したため、卓を終了しました'
-    if t.phase == 'playing' and (t.pot or 0) > 0 and other then
-        local bet = t.bet or 0
-        Money.add(other, bet, 'othello leave refund')
-        Money.add(src, bet, 'othello leave refund')     -- 切断時は失敗することがある(フレームワーク側の仕様)
-        sendMoney(src)
-        text = ('相手が退席したため引き分けとなり、賭け金 %s%d は返金されました。卓を終了しました'):format(Config.Currency, bet)
-    end
-
-    -- 卓を空にする (相手も退席扱い)
-    t.seats, t.names = {}, {}
-    t.pot, t.bet = 0, nil
-    t.phase, t.board, t.result, t.last, t.passed = 'waiting', nil, nil, nil, nil
-    if other then
-        seatOf[other] = nil
-        TriggerClientEvent('kani-othello:kicked', other, text, t.id, nil)
-        sendMoney(other)
-    end
-    syncBoard(t)
-end
-
--- 預かり金を出せない人を卓から外す
-local function kick(t, seat, text)
-    local src = t.seats[seat]
-    if not src then return end
-    TriggerClientEvent('kani-othello:kicked', src, text, t.id, t.bet)
-    removePlayer(src, '相手の所持金が足りないため、卓を終了しました')
-end
-
--- 対局開始前に両者から賭け金を預かる。失敗したら false (足りない人は卓から外れる)
-local function escrow(t)
-    local bet = t.bet or 0
-    t.pot = 0
-    if bet <= 0 then return true end
-    local ok = {}
-    for seat = 1, 2 do ok[seat] = Money.remove(t.seats[seat], bet, 'othello bet') end
-    if ok[1] and ok[2] then
-        t.pot = bet * 2
-        for seat = 1, 2 do sendMoney(t.seats[seat]) end
-        return true
-    end
-    for seat = 1, 2 do
-        if ok[seat] then Money.add(t.seats[seat], bet, 'othello refund') end
-    end
-    for seat = 1, 2 do
-        if not ok[seat] then kick(t, seat, '所持金が足りないため卓から外れました') end
-    end
-    return false
-end
-
-RegisterNetEvent('kani-othello:requestBoards', function()
-    local src = source
-    for _, t in pairs(tables) do syncBoard(t, src) end
-    TriggerEvent('kani-othello:internalSendPlaced', src)
-end)
-
-RegisterNetEvent('kani-othello:getMoney', function()
-    sendMoney(source)
-end)
-
-local function validBet(bet)
-    return type(bet) == 'number' and bet == bet and bet >= 0 and bet <= Config.MaxBet and bet == math.floor(bet)
-end
-
-RegisterNetEvent('kani-othello:join', function(tid, bet)
+---------------------------------------------------------------- イベント
+-- 卓の様子 (着席前の確認用)
+RegisterNetEvent('kani-othello:tableInfo', function(tid)
     local src = source
     local t = tables[tid]
-    if not t or seatOf[src] then return end
-    local seat = (not t.seats[1]) and 1 or ((not t.seats[2]) and 2 or nil)
-    if not seat then
-        TriggerClientEvent('kani-othello:kicked', src, 'この卓は満席です', tid, t.bet)
-        return
+    if not t then return end
+    local count = (t.seats[1] and 1 or 0) + (t.seats[2] and 1 or 0)
+    TriggerClientEvent('kani-othello:tableInfo', src, {
+        tableId  = tid,
+        status   = count == 0 and 'empty' or (count == 1 and 'host' or 'full'),
+        hostName = t.names[1] or t.names[2],
+        bet      = t.bet,
+        balance  = Money.balance(src),
+        maxBet   = Config.MaxBet,
+        bets     = Config.Bets,
+        rake     = Config.Rake,
+        currency = Config.Currency,
+    })
+end)
+
+-- data = { tableId, mode = 'host'|'accept', bet }
+RegisterNetEvent('kani-othello:join', function(data)
+    local src = source
+    if type(data) ~= 'table' then return end
+    local tid, bet = tonumber(data.tableId), tonumber(data.bet)
+    local t = tables[tid]
+    if not t or seatOf[src] or not bet then return end
+    if #(GetEntityCoords(GetPlayerPed(src)) - t.coords) > 6.0 then return end
+    bet = math.floor(bet)
+    local count = (t.seats[1] and 1 or 0) + (t.seats[2] and 1 or 0)
+
+    local function reject(msg)
+        notice(src, msg)
+        TriggerClientEvent('kani-othello:joinFailed', src)
     end
 
-    -- 卓が空なら着席者が賭け金を決める。誰かいればその卓の賭け金に従う
-    local empty = not t.seats[1] and not t.seats[2]
-    local need
-    if empty then
-        bet = tonumber(bet)
-        if not bet or not validBet(bet) then
-            TriggerClientEvent('kani-othello:kicked', src, '賭け金が不正です', tid, nil)
-            return
-        end
-        bet = math.floor(bet)
-        need = bet
-    else
-        -- 2人目: 画面で承諾した賭け金が、今の卓の賭け金と一致しなければ着席させない
-        need = t.bet or 0
-        if tonumber(bet) ~= need then
-            TriggerClientEvent('kani-othello:kicked', src, '賭け金が変更されています。内容を確認してください', tid, t.bet)
-            return
-        end
-    end
-    if Money.get(src) < need then
-        TriggerClientEvent('kani-othello:kicked', src, '所持金が足りません', tid, (not empty) and t.bet or nil)
-        sendMoney(src)
-        return
-    end
-    if empty then t.bet = need end
-
-    t.seats[seat] = src
-    t.names[seat] = GetPlayerName(src) or ('Player ' .. src)
-    seatOf[src] = { tid = tid, seat = seat }
-    if t.seats[1] and t.seats[2] then
-        resetMatch(t)
-        if not escrow(t) then return end    -- 失敗時は kick 側で同期済み
-        startRound(t)
-    else
+    if data.mode == 'host' then
+        if count ~= 0 then return reject('先に座った人がいます。金額を確認してください') end
+        if bet < 0 or bet > Config.MaxBet then return reject('賭け金は 0〜' .. fmt(Config.MaxBet) .. ' で入力してください') end
+        if Money.balance(src) < bet then return reject('所持金が足りません') end
+        t.bet = bet
+        t.seats[1], t.names[1] = src, GetPlayerName(src) or ('Player ' .. src)
+        seatOf[src] = { tid = tid, seat = 1 }
         t.phase = 'waiting'
+        broadcast(t)
+    elseif data.mode == 'accept' then
+        if count ~= 1 then return reject(count == 0 and '卓に誰もいません' or 'この卓は満席です') end
+        if bet ~= t.bet then return reject('賭け金が変わっています。もう一度確認してください') end
+        if Money.balance(src) < t.bet then return reject('所持金が足りません') end
+        local seat = t.seats[1] and 2 or 1
+        t.seats[seat], t.names[seat] = src, GetPlayerName(src) or ('Player ' .. src)
+        seatOf[src] = { tid = tid, seat = seat }
+        t.wins, t.gameNo = { 0, 0 }, 0
+        if startGame(t) then broadcast(t) end
     end
-    broadcast(t)
-    sendMoney(src)
 end)
 
 RegisterNetEvent('kani-othello:leave', function()
-    removePlayer(source)
+    removePlayer(source, 'leave')
 end)
 
+local function removeTable(t, reasonForSeated)
+    dissolve(t, nil, reasonForSeated)
+    tables[t.id] = nil
+    syncTables()
+end
+
 AddEventHandler('playerDropped', function()
-    removePlayer(source)
+    local src = source
+    removePlayer(src, 'drop')
+    for _, t in pairs(tables) do
+        if t.owner == src then removeTable(t, '卓の持ち主が抜けたため、卓が片付けられました') end
+    end
+end)
+
+-- キャラクターのログアウト(切断せず別キャラ選択へ戻る場合)。フレームワークのイベントに依存
+local function onLogout(src)
+    if not src then return end
+    removePlayer(src, 'drop')
+    for _, t in pairs(tables) do
+        if t.owner == src then removeTable(t, '卓の持ち主がログアウトしたため、卓が片付けられました') end
+    end
+end
+AddEventHandler('QBCore:Server:OnPlayerUnload', onLogout)   -- QBCore / Qbox(互換イベント)
+AddEventHandler('esx:playerLogout', onLogout)               -- ESX
+
+---------------------------------------------------------------- アイテムで置く卓
+local nextId = 1000
+
+local function ownedTable(src)
+    for _, t in pairs(tables) do if t.owner == src then return t end end
+end
+
+-- アイテムを使った: 置く位置はクライアントで決めてもらう
+Item.onUse(function(src)
+    if ownedTable(src) then return notice(src, 'もう卓を置いています。先に片付けてください') end
+    TriggerClientEvent('kani-othello:placeSet', src)
+end)
+
+RegisterNetEvent('kani-othello:place', function(coords, heading)
+    local src = source
+    if type(coords) ~= 'vector3' or type(heading) ~= 'number' then return end
+    if not Item.has(src) then return notice(src, 'オセロ卓を持っていません') end
+    if ownedTable(src) then return notice(src, 'もう卓を置いています。先に片付けてください') end
+    local count = 0
+    for _, t in pairs(tables) do
+        if t.owner then count = count + 1 end
+        if #(t.coords - coords) < Config.Item.MinGap then return notice(src, '近くに別の卓があります') end
+    end
+    if count >= Config.Item.MaxPlaced then return notice(src, 'これ以上卓を置けません') end
+    if #(GetEntityCoords(GetPlayerPed(src)) - coords) > Config.Item.Distance + 2.0 then return end
+    nextId = nextId + 1
+    local t = newTable(nextId, Config.Item.Label, coords, heading, src)
+    syncTables()
+    syncBoard(t)
+    notice(src, '卓を置きました。片付けるときは卓の前で G')
+end)
+
+RegisterNetEvent('kani-othello:pickup', function(tid)
+    local src = source
+    local t = tables[tonumber(tid)]
+    if not t or not t.owner then return end
+    if Config.Item.OnlyOwnerPickup and t.owner ~= src and not IsPlayerAceAllowed(src, 'command.othellopickup') then
+        return notice(src, '他の人の卓は片付けられません')
+    end
+    if #(GetEntityCoords(GetPlayerPed(src)) - t.coords) > 4.0 then return end
+    if t.seats[1] or t.seats[2] then return notice(src, '人が座っている間は片付けられません') end
+    tables[t.id] = nil
+    syncTables()
+    notice(src, '卓を片付けました')
 end)
 
 RegisterNetEvent('kani-othello:move', function(x, y)
@@ -314,14 +408,14 @@ RegisterNetEvent('kani-othello:move', function(x, y)
         t.turn = opp
     elseif hasMove(t.board, color) then
         t.turn = color
-        t.passed = opp      -- opp 側がパス
+        t.passed = opp          -- 相手は置ける所が無くパス
     else
-        finishRound(t)
+        finishGame(t)
     end
     broadcast(t)
 end)
 
--- 結果画面から「もう一度」: 両者が押したら次の対局開始(先手後手交代)
+-- 結果画面の「再戦」: 両者が押したら賭け金を預かり、先手を交代して次の対局
 RegisterNetEvent('kani-othello:next', function()
     local src = source
     local info = seatOf[src]
@@ -330,194 +424,24 @@ RegisterNetEvent('kani-othello:next', function()
     if not t or t.phase ~= 'result' then return end
     t.ready[info.seat] = true
     if t.ready[1] and t.ready[2] then
-        t.game = t.game + 1
-        if not escrow(t) then return end    -- 失敗時は kick 側で同期済み
-        startRound(t)
-        broadcast(t)
+        t.gameNo = t.gameNo + 1
+        if startGame(t) then broadcast(t) end
+    else
+        local other = t.seats[3 - info.seat]
+        if other then notice(other, (t.names[info.seat] or '相手') .. ' が再戦を希望しています') end
     end
 end)
 
--- ---------------------------------------------------------------- スタンドアロン財布用コマンド
--- /othellowallet : 自分の所持金 (スタンドアロン時のみ)
-RegisterCommand('othellowallet', function(src)
-    if src == 0 then return end
-    local msg = Money.framework() == 'standalone'
-        and ('所持金: %s%d'):format(Config.Currency, Money.get(src))
-        or 'このコマンドはスタンドアロン財布のときだけ使えます'
-    TriggerClientEvent('chat:addMessage', src, { args = { 'オセロ', msg } })
-end, false)
+-- クライアント起動時: 卓の一覧と盤面を送る
+RegisterNetEvent('kani-othello:requestBoards', function()
+    local src = source
+    syncTables(src)
+    for _, t in pairs(tables) do syncBoard(t, src) end
+end)
 
--- othellogive <プレイヤーID> <金額> : 管理者(ace: command.othellogive)/サーバーコンソール用
-RegisterCommand('othellogive', function(src, args)
-    local target, amount = tonumber(args[1]), tonumber(args[2])
-    local function reply(m)
-        if src == 0 then print(m) else TriggerClientEvent('chat:addMessage', src, { args = { 'オセロ', m } }) end
-    end
-    if Money.framework() ~= 'standalone' then return reply('スタンドアロン財布のときだけ使えます') end
-    if not target or not amount or not GetPlayerName(target) then return reply('使い方: othellogive <プレイヤーID> <金額>') end
-    Money.add(target, amount, 'othellogive')
-    reply(('%s に %s%d 付与 (現在 %s%d)'):format(GetPlayerName(target), Config.Currency, amount, Config.Currency, Money.get(target)))
-    sendMoney(target)
-end, true)
-
--- リソース停止時: 対局中の預かり金は両者へ返金
 AddEventHandler('onResourceStop', function(res)
     if res ~= GetCurrentResourceName() then return end
     for _, t in pairs(tables) do
-        if (t.pot or 0) > 0 then
-            for seat = 1, 2 do
-                if t.seats[seat] then Money.add(t.seats[seat], t.bet or 0, 'othello stop refund') end
-            end
-            t.pot = 0
-        end
-    end
-end)
-
--- ---------------------------------------------------------------- アイテムで置ける卓
-local placed = {}              -- [id] = { id, x, y, z, h, owner }   (メモリ上のみ。再起動で消える)
-local nextPlacedId = 1000
-
-local function licenseOf(src)
-    return GetPlayerIdentifierByType(src, 'license') or ('src:' .. src)
-end
-
-local function toast(src, text)
-    TriggerClientEvent('kani-othello:toast', src, text)
-end
-
-local function placedList()
-    local l = {}
-    for _, p in pairs(placed) do l[#l + 1] = { id = p.id, x = p.x, y = p.y, z = p.z, h = p.h } end
-    table.sort(l, function(a, b) return a.id < b.id end)
-    return l
-end
-
-local function sendPlaced(target)
-    TriggerClientEvent('kani-othello:placed', target or -1, placedList())
-end
-
-AddEventHandler('kani-othello:internalSendPlaced', function(src) sendPlaced(src) end)
-
-local function addPlacedTable(p)
-    placed[p.id] = p
-    tables[p.id] = { id = p.id, seats = {}, names = {}, phase = 'waiting' }
-    if p.id >= nextPlacedId then nextPlacedId = p.id + 1 end
-end
-
--- 置いた卓は保存しない(サーバーが閉じたら片付いた状態)。古いバージョンの保存データが残っていれば消す
-DeleteResourceKvp('placed_tables')
-
-local lastUse = {}
--- アイテムは消費しない(ログアウト・切断・サーバー停止で卓が消えてもアイテムを失わないため)
-local function placeTableFor(src)
-    local P = Config.Placeable
-    local now = GetGameTimer()
-    if lastUse[src] and now - lastUse[src] < 1500 then return false end   -- 二重発火の防止
-    lastUse[src] = now
-
-    local ped = GetPlayerPed(src)
-    if not ped or ped == 0 then return false end
-    local pc, h = GetEntityCoords(ped), GetEntityHeading(ped)
-    local r = math.rad(h)
-    local x, y = pc.x - math.sin(r) * P.Distance, pc.y + math.cos(r) * P.Distance
-
-    local owner = licenseOf(src)
-    local count, total = 0, 0
-    for _, p in pairs(placed) do
-        total = total + 1
-        if p.owner == owner then count = count + 1 end
-    end
-    if total >= P.MaxTotal then toast(src, 'これ以上は卓を置けません') return false end
-    if count >= P.MaxPerPlayer then
-        toast(src, ('卓は1人%d台まで置けます。先に片付けてください'):format(P.MaxPerPlayer))
-        return false
-    end
-    local function tooClose(cx, cy)
-        local dx, dy = x - cx, y - cy
-        return (dx * dx + dy * dy) < P.MinSpacing * P.MinSpacing
-    end
-    for _, t in ipairs(Config.Tables) do
-        if tooClose(t.coords.x, t.coords.y) then toast(src, '他の卓に近すぎます') return false end
-    end
-    for _, p in pairs(placed) do
-        if tooClose(p.x, p.y) then toast(src, '他の卓に近すぎます') return false end
-    end
-
-    local p = { id = nextPlacedId, x = x, y = y, z = pc.z, h = h, owner = owner }
-    addPlacedTable(p)
-    sendPlaced()
-    syncBoard(tables[p.id])
-    toast(src, '卓を置きました。片付けるときは卓の横で G キー、またはターゲット(Alt)')
-    return true
-end
-
-RegisterNetEvent('kani-othello:pickupTable', function(tid)
-    local src = source
-    local p, t = placed[tid], tables[tid]
-    if not p or not t then return end
-    if t.seats[1] or t.seats[2] then toast(src, '使用中の卓は片付けられません') return end
-    if Config.Placeable.OnlyOwnerPickup and p.owner ~= licenseOf(src)
-        and not IsPlayerAceAllowed(src, 'command.othellopickup') then
-        toast(src, '他の人の卓は片付けられません')
-        return
-    end
-    local ped = GetPlayerPed(src)
-    if not ped or ped == 0 or #(GetEntityCoords(ped) - vec3(p.x, p.y, p.z)) > 4.0 then return end
-    placed[tid], tables[tid] = nil, nil
-    sendPlaced()
-    toast(src, '卓を片付けました')
-end)
-
--- 持ち主の卓をすべて片付ける(ログアウト・切断時)。座っている人は全員退席扱い(対局中なら賭け金は返金)
-local function cleanupOwner(owner)
-    local ids = {}
-    for id, p in pairs(placed) do
-        if p.owner == owner then ids[#ids + 1] = id end
-    end
-    if #ids == 0 then return end
-    local text = '卓の持ち主が退出したため、卓を片付けました'
-    for _, id in ipairs(ids) do
-        local t = tables[id]
-        local first = t and (t.seats[1] or t.seats[2])
-        if first then
-            removePlayer(first, text)       -- 対局中なら返金。もう1人にも通知される
-            TriggerClientEvent('kani-othello:kicked', first, text, id, nil)
-        end
-        placed[id], tables[id] = nil, nil
-    end
-    sendPlaced()
-end
-
-AddEventHandler('playerDropped', function()
-    cleanupOwner(licenseOf(source))
-end)
-
--- キャラクターのログアウト(切断せず別キャラ選択へ戻る場合)。フレームワークのイベントに依存
-AddEventHandler('QBCore:Server:OnPlayerUnload', function(src)       -- QBCore / Qbox(互換イベント)
-    if src then cleanupOwner(licenseOf(src)) end
-end)
-AddEventHandler('esx:playerLogout', function(src)                   -- ESX
-    if src then cleanupOwner(licenseOf(src)) end
-end)
-
--- 使えるアイテムとして登録 (フレームワークの起動順を待つ)
-CreateThread(function()
-    Wait(1500)
-    local item, fw = Config.Placeable.Item, Money.framework()
-    local function use(source) placeTableFor(source) end
-    if fw == 'qbx' then
-        exports.qbx_core:CreateUseableItem(item, use)
-    elseif fw == 'qb' then
-        exports['qb-core']:GetCoreObject().Functions.CreateUseableItem(item, use)
-    elseif fw == 'esx' then
-        exports['es_extended']:getSharedObject().RegisterUsableItem(item, use)
-    end
-end)
-
--- ox_inventory の item 定義で server = { export = 'kani-othello.othello_table' } を使う場合(フレームワーク無しの ox 用)
-exports('othello_table', function(event, item, inventory)
-    if event == 'usingItem' and inventory and inventory.id then
-        placeTableFor(inventory.id)
-        return false
+        if t.phase == 'playing' then refundAll(t) end
     end
 end)

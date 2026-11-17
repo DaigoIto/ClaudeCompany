@@ -1,0 +1,63 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<CMapTypes>
+  <archetypes>
+    <Item type="CBaseArchetypeDef">
+      <lodDist value="80" />
+      <flags value="0" />
+      <specialAttribute value="0" />
+      <bbMin x="-0.43" y="-0.43" z="0.0" />
+      <bbMax x="0.43" y="0.43" z="0.76" />
+      <bsCentre x="0.0" y="0.0" z="0.38" />
+      <bsRadius value="0.7170774" />
+      <hdTextureDist value="100" />
+      <name>kani_othello_table</name>
+      <textureDictionary>kani_othello_table</textureDictionary>
+      <physicsDictionary>kani_othello_table</physicsDictionary>
+      <assetType>ASSET_TYPE_DRAWABLE</assetType>
+      <assetName>kani_othello_table</assetName>
+    </Item>
+    <Item type="CBaseArchetypeDef">
+      <lodDist value="80" />
+      <flags value="0" />
+      <specialAttribute value="0" />
+      <bbMin x="-0.028882274" y="-0.028882274" z="-6.4555354e-11" />
+      <bbMax x="0.028882274" y="0.028882274" z="0.012" />
+      <bsCentre x="0.0" y="0.0" z="0.006" />
+      <bsRadius value="0.041284036" />
+      <hdTextureDist value="100" />
+      <name>kani_disc_white</name>
+      <textureDictionary>kani_disc_white</textureDictionary>
+      <assetType>ASSET_TYPE_DRAWABLE</assetType>
+      <assetName>kani_disc_white</assetName>
+    </Item>
+    <Item type="CBaseArchetypeDef">
+      <lodDist value="80" />
+      <flags value="0" />
+      <specialAttribute value="0" />
+      <bbMin x="-0.336" y="-0.336" z="0.0" />
+      <bbMax x="0.336" y="0.336" z="0.02" />
+      <bsCentre x="0.0" y="0.0" z="0.01" />
+      <bsRadius value="0.47528097" />
+      <hdTextureDist value="100" />
+      <name>kani_othello_board</name>
+      <textureDictionary>kani_othello_board</textureDictionary>
+      <assetType>ASSET_TYPE_DRAWABLE</assetType>
+      <assetName>kani_othello_board</assetName>
+    </Item>
+    <Item type="CBaseArchetypeDef">
+      <lodDist value="80" />
+      <flags value="0" />
+      <specialAttribute value="0" />
+      <bbMin x="-0.028882274" y="-0.028882274" z="-6.4555354e-11" />
+      <bbMax x="0.028882274" y="0.028882274" z="0.012" />
+      <bsCentre x="0.0" y="0.0" z="0.006" />
+      <bsRadius value="0.041284036" />
+      <hdTextureDist value="100" />
+      <name>kani_disc_black</name>
+      <textureDictionary>kani_disc_black</textureDictionary>
+      <assetType>ASSET_TYPE_DRAWABLE</assetType>
+      <assetName>kani_disc_black</assetName>
+    </Item>
+  </archetypes>
+  <name>kani_othello</name>
+</CMapTypes>
