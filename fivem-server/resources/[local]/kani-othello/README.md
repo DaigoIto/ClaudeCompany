@@ -33,12 +33,13 @@ ox_inventory の `data/items.lua`:
     weight = 5000,
     stack = false,
     close = true,
-    consume = 0,   -- 消費はこのリソースが行うので ox 側では消さない
-    description = '地面に置いてオセロができる机',
+    consume = 0,   -- 消費はこのリソースが扱わない(アイテムは減らない)ので ox 側でも消さない
+    description = '使うと目の前にオセロの卓を置く。卓の横で G(またはAltの目)で片付け',
+    server = { export = 'kani-othello.othello_table' },
 },
 ```
-- ox_inventory だけでフレームワーク無しの場合は、上に `server = { export = 'kani-othello.othello_table' }` も追加
-- ox_inventory を使わない QBCore は `qb-core/shared/items.lua`、ESX は `items` テーブルに、同名のアイテムを追加
+- QBCore は `qb-core/shared/items.lua`(`useable = true`)、ESX は `items` テーブルに同名のアイテムを追加。「使う」の登録はこのリソースが自動で行う
+- 二重に反応しても、1.5秒以内の連続使用は無視されるので卓は1台しか置かれない
 - 友人サーバー(BANAN_City)では、これらは `[Kani-script]` の外なので、サーバー管理者側で追加が必要
 
 ## 賭け(対人戦のみ。CPU戦は賭けなし)
