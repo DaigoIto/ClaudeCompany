@@ -1,6 +1,5 @@
 Config = {}
 
-Config.Command   = 'othello'    -- どこでも開けるコマンド(CPU戦)
 Config.UseKey    = 38           -- 卓で押すキー (38 = E)
 Config.DrawDist  = 12.0         -- マーカーを描画する距離
 Config.UseDist   = 1.8          -- 操作できる距離
@@ -35,7 +34,8 @@ Config.Tables = {
     -- { id = 1, label = 'オセロ卓', coords = vec3(1698.0, 3256.0, 41.1), heading = 0.0 },
 }
 
--- アイテムで置ける机(可搬式)。アイテムを使うと目の前に卓が置かれ、空いていれば「G」で片付けてアイテムに戻せる
+-- アイテムで置ける机(可搬式)。アイテムを使うと目の前に卓が置かれる(アイテムは消費しない)。
+-- 空いていれば「G」/ターゲットで片付け。持ち主のログアウト・切断、サーバー停止で卓は消える(保存しない)
 -- アイテム定義(ox_inventory の data/items.lua など)はサーバー側の別リソースに追加が必要 → README 参照
 Config.Placeable = {
     Item            = 'othello_table',   -- アイテム名
@@ -45,8 +45,8 @@ Config.Placeable = {
     MaxTotal        = 20,                -- サーバー全体の上限
     MinSpacing      = 2.5,               -- 他の卓との最小距離(m)。椅子が重ならないように
     PickupKey       = 47,                -- 片付けるキー (47 = G)
+    UseTarget       = true,              -- ターゲット(Altの目: ox_target / qb-target)からも片付けられるようにする
     OnlyOwnerPickup = true,              -- 置いた本人(license)だけ片付けられる。管理者(ace command.othellopickup)は常に可
-    Persist         = true,              -- 置いた卓をサーバー再起動後も残す(resource KVP に保存)
 }
 
 -- 黒い机(スクリプトで描画。モデルは使わない)。サイズ・色はここで調整
