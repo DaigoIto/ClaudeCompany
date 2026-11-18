@@ -25,10 +25,10 @@
       <bsCentre x="0.0" y="0.0" z="0.006" />
       <bsRadius value="0.041284036" />
       <hdTextureDist value="100" />
-      <name>kani_disc_white</name>
-      <textureDictionary>kani_disc_white</textureDictionary>
+      <name>kani_disc_black</name>
+      <textureDictionary>kani_disc_black</textureDictionary>
       <assetType>ASSET_TYPE_DRAWABLE</assetType>
-      <assetName>kani_disc_white</assetName>
+      <assetName>kani_disc_black</assetName>
     </Item>
     <Item type="CBaseArchetypeDef">
       <lodDist value="80" />
@@ -53,10 +53,10 @@
       <bsCentre x="0.0" y="0.0" z="0.006" />
       <bsRadius value="0.041284036" />
       <hdTextureDist value="100" />
-      <name>kani_disc_black</name>
-      <textureDictionary>kani_disc_black</textureDictionary>
+      <name>kani_disc_white</name>
+      <textureDictionary>kani_disc_white</textureDictionary>
       <assetType>ASSET_TYPE_DRAWABLE</assetType>
-      <assetName>kani_disc_black</assetName>
+      <assetName>kani_disc_white</assetName>
     </Item>
   </archetypes>
   <name>kani_othello</name>

@@ -25,10 +25,12 @@ w, h = src.size
 px = np.array(src.pixels[:], dtype=np.float32).reshape(h, w, 4)
 lum = px[:, :, :3].mean(axis=2, keepdims=True)
 lum = (lum - lum.min()) / max(lum.max() - lum.min(), 1e-6)          # 0..1 に正規化した木目の濃淡
+# 黒檀色(炭のような黒)。真っ黒にすると、ゲーム内の陰影で縁の面取りだけが沈んで「段差」に見える。
+# 木目と縁の丸みが見えるよう、0.11〜0.20(DDS で 28〜51)程度の濃さにする
 dark = np.zeros_like(px)
-dark[:, :, 0] = 0.020 + lum[:, :, 0] * 0.035
-dark[:, :, 1] = 0.020 + lum[:, :, 0] * 0.035
-dark[:, :, 2] = 0.024 + lum[:, :, 0] * 0.040                          # わずかに青み(黒檀の艶)
+dark[:, :, 0] = 0.115 + lum[:, :, 0] * 0.085
+dark[:, :, 1] = 0.115 + lum[:, :, 0] * 0.085
+dark[:, :, 2] = 0.130 + lum[:, :, 0] * 0.095                          # わずかに青み(黒檀の艶)
 dark[:, :, 3] = 1.0
 img = bpy.data.images.new("ot_tex_table", w, h, alpha=False)
 img.pixels.foreach_set(dark.ravel())
